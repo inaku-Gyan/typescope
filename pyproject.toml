@@ -1,0 +1,21 @@
+[project]
+name = "typescope"
+version = "0.0.1"
+description = "Runtime type-level assignability check for Python"
+keywords = ["runtime type checking", "subtyping"]
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "inaku-Gyan", email = "inaku.gs@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/inaku-Gyan/typescope"
+Repository = "https://github.com/inaku-Gyan/typescope"
+Issues = "https://github.com/inaku-Gyan/typescope/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
