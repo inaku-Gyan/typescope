@@ -1,4 +1,4 @@
-name: Run pytest on Python changes
+name: Tests
 
 on:
   push:
@@ -37,4 +37,4 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run pytest --cov=typescope
+          uv run pytest --cov=typescope --cov-fail-under=70

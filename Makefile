@@ -46,11 +46,11 @@ test: .requires-uv
 
 .PHONY: testcov  ## Run the test suite with coverage reporting
 testcov: .requires-uv
-	uv run pytest --cov=typescope
+	uv run pytest --cov=typescope --cov-fail-under=70
 
 
 .PHONY: .all-checks  ## Run the standard set of checks performed in CI
-.all-checks: typecheck lint test
+.all-checks: typecheck lint testcov
 	@echo "All checks passed!"
 
 
