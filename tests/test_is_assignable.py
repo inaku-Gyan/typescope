@@ -1,16 +1,17 @@
-from typescope import is_assignable
+from typescope import is_assignable as ia
 
 
 def test_basic_builtin_types() -> None:
     """Tests for basic builtin types like int, str, etc."""
-    assert is_assignable(int, int)
-    assert not is_assignable(int, str)
+    assert ia(int, int)
+    assert not ia(int, str)
 
-    assert is_assignable(str, str)
-    assert not is_assignable(str, int)
+    assert ia(str, str)
+    assert not ia(str, int)
 
-    assert is_assignable(float, float)
-    assert not is_assignable(float, int)
+    assert ia(float, float)
+    assert not ia(float, int)
 
-    assert is_assignable(bool, bool)
-    # assert not is_assignable(bool, int)  # bool is not a subtype of int in this context
+    assert ia(bool, bool)
+    assert not ia(bool, int), "`bool` should not be assignable to `int` by default."
+    assert ia(bool, int, {"allow_bool_to_int": True})

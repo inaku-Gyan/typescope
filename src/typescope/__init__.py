@@ -1,15 +1,11 @@
 """typescope - Runtime type-level assignability check"""
 
-from typing import Any
+__version__ = "0.0.2"
 
+from ._assignability import is_assignable
+from ._assignability_config import AssignabilityConfigDict
 
-def is_assignable(source_type: type[Any], target_type: type[Any]) -> bool:
-    """Check if `source` type can be assigned to `target` type at runtime.
-
-    Currently a placeholder that always returns False.
-    """
-    # TODO: replace with real subtyping logic
-    return issubclass(source_type, target_type)
-
-
-__all__ = ["is_assignable"]
+__all__ = [
+    "is_assignable",
+    "AssignabilityConfigDict",
+]
