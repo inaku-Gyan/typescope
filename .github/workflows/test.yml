@@ -39,9 +39,9 @@ jobs:
         run: |
           uv run pytest --cov=typescope --cov-fail-under=70 --cov-report=xml
 
-      - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: true
