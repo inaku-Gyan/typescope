@@ -23,6 +23,7 @@ dev = [
     "pre-commit>=4.3.0",
     "pyright>=1.1.404",
     "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
     "ruff>=0.12.10",
 ]
 
@@ -72,3 +73,6 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = "tests"
