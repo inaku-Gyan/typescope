@@ -1,3 +1,4 @@
+from types import NoneType
 from typing import Any
 
 from ._assignability_config import AssignabilityConfig as _Config
@@ -8,7 +9,7 @@ __all__ = ["is_assignable"]
 
 
 def is_assignable(
-    source_type: type[Any], dest_type: type[Any], config: _ConfigDict | None = None
+    source_type: Any, dest_type: Any, config: _ConfigDict | None = None
 ) -> bool:
     """Determines if a value of `source_type` can be assigned to a variable of `dest_type`.
 
@@ -31,6 +32,9 @@ def _special_judge_for_basic_types(
 
     if src_tp is bool and dst_tp is int:
         return config.allow_bool_to_int
+
+    if src_tp in (None, NoneType) and dst_tp in (None, NoneType):
+        return config.none_as_nonetype
 
 
 def _is_assignable_core(src_tp: type[Any], dst_tp: type[Any], config: _Config) -> bool:

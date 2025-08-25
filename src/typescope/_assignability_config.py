@@ -10,6 +10,9 @@ class AssignabilityConfigDict(TypedDict, total=False):
     allow_bool_to_int: bool
     """Whether to allow `bool` to be assigned to `int`. Defaults to `False`."""
 
+    none_as_nonetype: bool
+    """Whether to treat `None` as `NoneType`. Defaults to `True`."""
+
 
 @dataclass(frozen=True)
 class AssignabilityConfig:
@@ -17,6 +20,9 @@ class AssignabilityConfig:
 
     allow_bool_to_int: bool = False
     """Whether to allow `bool` to be assigned to `int`. Defaults to `False`."""
+
+    none_as_nonetype: bool = True
+    """Whether to treat `None` as `NoneType`. Defaults to `True`."""
 
 
 def make_assignability_config(
