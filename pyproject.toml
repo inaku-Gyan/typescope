@@ -5,9 +5,7 @@ description = "Runtime type-level assignability check for Python"
 keywords = ["runtime type checking", "subtyping"]
 readme = "README.md"
 license = { text = "MIT" }
-authors = [
-    { name = "inaku-Gyan", email = "inaku.gs@gmail.com" }
-]
+authors = [{ name = "inaku-Gyan", email = "inaku.gs@gmail.com" }]
 requires-python = ">=3.13"
 dependencies = []
 
@@ -19,3 +17,58 @@ Issues = "https://github.com/inaku-Gyan/typescope/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.3.0",
+    "pyright>=1.1.404",
+    "pytest>=8.4.1",
+    "ruff>=0.12.10",
+]
+
+[tool.ruff]
+# 先只针对 Python 3.13
+target-version = "py313"
+# 自动修复
+fix = true
+
+[tool.ruff.lint]
+# 选择要启用的规则
+select = [
+    "ANN", # flake8-annotations - 检查类型注解
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "D",   # pydocstyle - 文档字符串检查
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "ISC", # flake8-implicit-str-concat - 隐式字符串连接检查
+    "N",   # pep8-naming - 命名约定
+    "PL",  # pylint - 部分 Pylint 规则
+    "UP",  # pyupgrade
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "D100",    # Missing docstring in public module
+    "D101",    # Missing docstring in public class
+    "D102",    # Missing docstring in public method
+    "D103",    # Missing docstring in public function
+    "D104",    # Missing docstring in public package
+    "D105",    # Missing docstring in magic method
+    "D106",    # Missing docstring in public nested class
+    "D107",    # Missing docstring in `__init__`
+    "D203",    # 1 blank line required before class docstring
+    "D213",    # Multi-line docstring summary should start at the second line
+    "D400",    # First line should end with a period
+    "D401",    # First line of docstring should be in imperative mood: "{first_line}"
+    "D415",    # First line should end with a period, question mark, or exclamation point
+    "E501",    # Line too long ({width} > {limit})
+    "F405",    # {name} may be undefined, or defined from star imports
+    "PLC0415", # import should be at the top-level of a file
+    "PLR2004", # Magic value used in comparison, consider replacing {value} with a constant variable
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

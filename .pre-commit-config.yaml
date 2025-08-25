@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      # Ruff：Lint + 自动格式化
+      - id: ruff
+        name: ruff lint & format
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+
+      # Pyright：类型检查
+      - id: pyright
+        name: pyright type check
+        entry: uv run pyright
+        language: system
+        types: [python]
