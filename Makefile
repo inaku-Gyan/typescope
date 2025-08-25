@@ -46,7 +46,7 @@ test: .requires-uv
 
 .PHONY: testcov  ## Run the test suite with coverage reporting
 testcov: .requires-uv
-	uv run pytest --cov=typescope --cov-report=html
+	uv run pytest --cov=typescope
 
 
 .PHONY: .all-checks  ## Run the standard set of checks performed in CI
@@ -61,5 +61,7 @@ clean:
 	rm -rf .pytest_cache
 	rm -rf .ruff_cache
 	rm -f .coverage
+	rm -rf htmlcov
+	rm -f coverage.xml
 	rm -rf build
 	rm -rf dist
