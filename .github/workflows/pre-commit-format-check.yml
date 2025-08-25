@@ -1,0 +1,25 @@
+name: Pre-Commit Format Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install pre-commit
+        run: uv run pre-commit install
+
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
