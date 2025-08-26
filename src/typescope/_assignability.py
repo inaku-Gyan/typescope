@@ -39,6 +39,29 @@ def _special_judge_for_basic_types(
         return False
 
 
+TOP_TYPES = frozenset(
+    (
+        object,
+        Any,
+    )
+)
+
+BOTTOM_TYPES = frozenset((Any,))
+
+
+ROOT_TYPES = frozenset(()) | TOP_TYPES
+
+FINAL_TYPES = frozenset((None, type(None)))
+
+
+def _sepcial_judge_for_top_and_bottom_types(src_tp: Any, dst_tp: Any) -> bool | None:
+    """Special judge for top types and bottom types."""
+    if dst_tp in TOP_TYPES:
+        return True
+    if src_tp in BOTTOM_TYPES:
+        return True
+
+
 def _is_assignable_core(src_tp: Any, dst_tp: Any, config: _Config) -> bool:
     """Core logic for assignability check.
 
@@ -46,6 +69,10 @@ def _is_assignable_core(src_tp: Any, dst_tp: Any, config: _Config) -> bool:
     """
     if src_tp == dst_tp:
         return True
+
+    ret = _sepcial_judge_for_top_and_bottom_types(src_tp, dst_tp)
+    if ret is not None:
+        return ret
 
     ##### Handle Union types #####
     if is_union(src_tp):
