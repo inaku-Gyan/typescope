@@ -60,6 +60,7 @@ clean:
 	rm -f `find . -type f -name '*.py[co]'`
 	rm -rf .pytest_cache
 	rm -rf .ruff_cache
+	rm -rf .mypy_cache
 	rm -f .coverage
 	rm -rf htmlcov
 	rm -f coverage.xml
