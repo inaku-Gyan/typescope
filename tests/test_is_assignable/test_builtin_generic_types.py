@@ -1,7 +1,7 @@
 # ruff: noqa: UP006, UP007, UP045
 
 import typing
-from collections.abc import Iterable, Mapping, MutableSequence, Sequence
+from collections.abc import Iterable, Mapping, MutableSequence, Reversible, Sequence
 from typing import Any, Literal, TypeVar
 
 import pytest
@@ -72,6 +72,24 @@ def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
     assert ia(GenericConsumer[int], GenericConsumer[destination_consumer_type_contra])
 
 
+def test_contravariant_source_typevar_is_not_bound_from_destination_evidence() -> None:
+    from typing import Generic
+
+    source_consumer_type_contra = TypeVar(
+        "source_consumer_type_contra", contravariant=True
+    )
+
+    class GenericConsumer(Generic[source_consumer_type_contra]):
+        pass
+
+    result = evaluate_assignability(
+        GenericConsumer[source_consumer_type_contra], GenericConsumer[int]
+    )
+
+    assert result.status == "unknown"
+    assert result.reason_code == "typevar.binding_unknown"
+
+
 def test_explicit_any_can_bind_contravariant_destination_typevar() -> None:
     from typing import Any, Generic
 
@@ -125,6 +143,8 @@ def test_abstract_generic_inheritance_projects_arguments_between_abc_origins() -
     assert ia(MutableSequence[int], Sequence[object])
     assert ia(Mapping[str, int], Iterable[str])
     assert not ia(Mapping[str, int], Iterable[int])
+    assert ia(list[int], Reversible[int])
+    assert ia(dict[str, int], Reversible[str])
 
 
 def test_fixed_tuple_projects_its_element_union_to_sequence() -> None:
