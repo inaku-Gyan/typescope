@@ -74,6 +74,25 @@ def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
     )
 
 
+def test_contravariant_typevar_does_not_bind_implicit_unknown() -> None:
+    from typing import Generic
+
+    destination_unknown_consumer_type_contra = TypeVar(
+        "destination_unknown_consumer_type_contra", contravariant=True
+    )
+
+    class GenericConsumer(Generic[destination_unknown_consumer_type_contra]):
+        pass
+
+    result = evaluate_assignability(
+        GenericConsumer,
+        GenericConsumer[destination_unknown_consumer_type_contra],
+    )
+
+    assert result.status == "not_assignable"
+    assert result.reason_code == "assignability.unknown_type"
+
+
 def test_covariant_user_generic_follows_typevar_metadata() -> None:
     from typing import Generic
 
