@@ -348,7 +348,8 @@ def _normalize_generic(
 def _is_empty_tuple_expression(expression: Any) -> bool:
     """Recognize the public empty-tuple spellings without carrier checks."""
 
-    return not typing.get_args(expression)
+    bare_tuple = getattr(typing, "Tuple", None)
+    return expression is not bare_tuple and not typing.get_args(expression)
 
 
 _PROJECTION_IDENTITY = "identity"
