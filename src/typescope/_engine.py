@@ -384,7 +384,7 @@ def _evaluate_typevars(
     return _typevar_produces(typevar, destination, context, path)
 
 
-def _typevar_accepts(
+def _typevar_accepts(  # noqa: PLR0911 - explicit constraint branches
     source: NormalizedType,
     typevar: typing.TypeVar,
     context: EvaluationContext,
@@ -395,20 +395,42 @@ def _typevar_accepts(
     if existing is not None:
         return _evaluate(source, existing, context, path + ("typevar.binding",))
     if constraints:
+        candidates: list[NormalizedType] = []
         unknown: _Decision | None = None
         for index, constraint in enumerate(constraints):
             candidate = _normalize_typevar_target(constraint, context)
+            bindings_before = dict(context.typevar_bindings)
             decision = _evaluate(
                 source,
                 candidate,
                 context,
                 path + (f"typevar.constraint[{index}]",),
             )
+            context.typevar_bindings.clear()
+            context.typevar_bindings.update(bindings_before)
             if decision.status is AssignabilityStatus.ASSIGNABLE:
-                return decision
+                candidates.append(candidate)
             if decision.status is AssignabilityStatus.UNKNOWN:
                 unknown = decision
-        return unknown or _not_assignable(path + ("typevar.constraints",))
+        if not candidates:
+            return unknown or _not_assignable(path + ("typevar.constraints",))
+        if len(candidates) > 1:
+            exact = [candidate for candidate in candidates if candidate == source]
+            if len(exact) != 1:
+                if _is_special(source, SpecialType.ANY):
+                    context.typevar_bindings[typevar] = source
+                    return _assignable(path + ("typevar.bind",))
+                return _unknown(
+                    context,
+                    path + ("typevar.binding",),
+                    "typevar.binding_unknown",
+                    "multiple TypeVar constraints accept the source expression",
+                )
+            selected = exact[0]
+        else:
+            selected = candidates[0]
+        context.typevar_bindings[typevar] = selected
+        return _assignable(path + ("typevar.bind",))
 
     if typevar.__bound__ is not None:
         bound = _normalize_typevar_target(typevar.__bound__, context)
@@ -432,6 +454,8 @@ def _typevar_produces(  # noqa: PLR0911 - ordered TypeVar evidence rules
     constraints = typevar.__constraints__
     if constraints:
         unknown: _Decision | None = None
+        assignable = False
+        not_assignable = False
         for index, constraint in enumerate(constraints):
             decision = _evaluate(
                 _normalize_typevar_target(constraint, context),
@@ -439,11 +463,24 @@ def _typevar_produces(  # noqa: PLR0911 - ordered TypeVar evidence rules
                 context,
                 path + (f"typevar.constraint[{index}]",),
             )
-            if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
-                return decision
+            if decision.status is AssignabilityStatus.ASSIGNABLE:
+                assignable = True
+            elif decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+                not_assignable = True
             if decision.status is AssignabilityStatus.UNKNOWN:
                 unknown = decision
-        return unknown or _assignable(path + ("typevar.constraints",))
+        if unknown is not None:
+            return unknown
+        if assignable and not_assignable:
+            return _unknown(
+                context,
+                path + ("typevar.binding",),
+                "typevar.binding_unknown",
+                "not every constrained TypeVar instantiation satisfies the destination",
+            )
+        if not_assignable:
+            return _not_assignable(path + ("typevar.constraints",))
+        return _assignable(path + ("typevar.constraints",))
 
     if typevar.__bound__ is not None:
         return _evaluate(

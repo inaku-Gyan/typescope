@@ -107,13 +107,14 @@ def test_user_generic_inheritance_projects_typevar_bindings() -> None:
 def test_nested_generic_inheritance_substitutes_typevar_arguments() -> None:
     from typing import Generic
 
-    inherited_value_type = TypeVar("nested_inherited_value_type")
+    nested_inherited_value_type = TypeVar("nested_inherited_value_type")
 
-    class NestedBase(Generic[inherited_value_type]):
+    class NestedBase(Generic[nested_inherited_value_type]):
         pass
 
     class NestedChild(
-        NestedBase[list[inherited_value_type]], Generic[inherited_value_type]
+        NestedBase[list[nested_inherited_value_type]],
+        Generic[nested_inherited_value_type],
     ):
         pass
 
@@ -170,27 +171,29 @@ def test_typevar_identity_bounds_and_constraints_are_preserved() -> None:
 
 
 def test_source_typevar_constraints_require_every_permitted_instantiation() -> None:
-    constrained_type = TypeVar("source_constrained_type", int, str)
+    source_constrained_type = TypeVar("source_constrained_type", int, str)
 
-    result = evaluate_assignability(constrained_type, int)
+    result = evaluate_assignability(source_constrained_type, int)
 
     assert result.status == "unknown"
     assert result.reason_code == "typevar.binding_unknown"
-    assert ia(constrained_type, object)
+    assert ia(source_constrained_type, object)
 
 
 def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> None:
     from typing import Generic
 
-    first_type = TypeVar("constrained_first_type")
-    second_type = TypeVar("constrained_second_type")
-    constrained_type = TypeVar("repeated_constrained_type", int, str)
+    constrained_first_type = TypeVar("constrained_first_type")
+    constrained_second_type = TypeVar("constrained_second_type")
+    repeated_constrained_type = TypeVar("repeated_constrained_type", int, str)
 
-    class Pair(Generic[first_type, second_type]):
+    class Pair(Generic[constrained_first_type, constrained_second_type]):
         pass
 
-    assert ia(Pair[int, int], Pair[constrained_type, constrained_type])
-    assert not ia(Pair[int, str], Pair[constrained_type, constrained_type])
+    assert ia(Pair[int, int], Pair[repeated_constrained_type, repeated_constrained_type])
+    assert not ia(
+        Pair[int, str], Pair[repeated_constrained_type, repeated_constrained_type]
+    )
 
 
 def test_repeated_destination_typevar_uses_one_binding() -> None:
