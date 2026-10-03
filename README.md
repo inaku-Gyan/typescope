@@ -7,6 +7,9 @@
 [![license](https://img.shields.io/github/license/inaku-Gyan/typescope)](https://github.com/inaku-Gyan/typescope/blob/master/LICENSE)
 [![commit](https://img.shields.io/github/last-commit/inaku-Gyan/typescope)](https://github.com/inaku-Gyan/typescope/commits/master)
 
+> This is a toy project. If you are looking for a production-ready library,
+> [beartype](https://beartype.readthedocs.io/) would be a good choice!
+
 A library for runtime type-level assignability check.
 
 ## Development
