@@ -86,6 +86,16 @@ not_assignable. Branch ordering does not define native semantics.
   capability boundaries instead of silently becoming `Any` or false.
 - Recursive structural comparisons require bounded state and stable capability reason codes.
 
+## First-reconstruction boundary
+
+ADR-0008 narrows the implementation commitment for the first reconstruction. The
+member rules in this ADR remain the semantic target, but concrete-class-to-Protocol
+comparisons require a complete `MemberShape` from an explicit, safe provider. Dynamic
+members, unresolved annotations, unsafe descriptors, and unregistered dataclass-like
+providers return capability unknown. Protocol-to-Protocol and callback-Protocol
+comparisons may proceed when their member shapes are complete; dataclass-to-dataclass
+assignability remains nominal.
+
 ## Alternatives considered
 
 - Use `isinstance` with `@runtime_checkable` as the Protocol answer: rejected because it cannot
