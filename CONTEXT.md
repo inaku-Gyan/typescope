@@ -20,6 +20,18 @@ _Avoid_: expected type, output type
 A runtime object representing a Python type-system concept, including classes and forms from `typing` or related syntax.
 _Avoid_: annotation string, runtime value
 
+**Representation carrier**:
+The concrete runtime object and `type(...)` result used to carry a type expression, such as a `types.UnionType` or a `typing` alias; it is not the expression's semantic identity.
+_Avoid_: semantic type, canonical type
+
+**Normalized type form**:
+The version-independent semantic representation used by TypeScope to compare a type expression after inspecting public origin, arguments, special markers, and provenance.
+_Avoid_: runtime class, normalized `type`
+
+**Representation provenance**:
+Metadata retained from the original spelling or carrier, such as `typing.Union` versus PEP 604 syntax, so diagnostics can explain equivalent forms without using them as distinct native semantics.
+_Avoid_: checker result
+
 ## Semantic sources
 
 **Standard semantics**:
