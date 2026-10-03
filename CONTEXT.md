@@ -32,6 +32,26 @@ _Avoid_: runtime class, normalized `type`
 The normalized set of members required by a Protocol, including its Protocol inheritance chain and the member modes needed for comparison. A concrete source may satisfy this view structurally; a Protocol source does not become assignable to a concrete destination without nominal inheritance.
 _Avoid_: runtime-checkable shape, duck typing result
 
+**Structural shape**:
+The normalized evidence needed to compare a type whose assignability depends on declared members or keyed schema rather than only nominal identity. A structural shape records the observable members or keys, their type relations, mutability or requiredness, provenance, and whether the evidence is complete.
+_Avoid_: class name, `issubclass` result
+
+**Member shape**:
+The object-member view used for Protocols, callable objects, ordinary classes used as Protocol sources, and other member-bearing forms. It distinguishes attributes, properties, methods, class variables, readable or writable state, and callable signatures.
+_Avoid_: field list, runtime attribute snapshot
+
+**Key shape**:
+The mapping-schema view used for TypedDicts. It records each key's value type, requiredness, read-only state, and supported openness or extra-item evidence.
+_Avoid_: ordinary dictionary type, object member shape
+
+**Shape completeness**:
+The evidence state for a structural shape. `complete` permits the relevant structural rule; `partial` or `unknown` means that unresolved annotations, dynamic members, descriptors, or unsupported providers prevent a safe conclusion and produce capability unknown. An explicitly absent member or key remains a definite semantic mismatch.
+_Avoid_: missing member, false result
+
+**Nominal dataclass status**:
+The rule that `dataclasses.dataclass` does not create a structural assignability category. Dataclass fields may provide member evidence when checking a Protocol or a generated constructor signature, but two dataclass types are assignable through ordinary nominal and generic rules unless another typing form defines a structural relation.
+_Avoid_: dataclass shape equivalence
+
 **Callable signature**:
 The normalized calling contract used for assignability: parameter kinds and names, requiredness, variadic parameters, and return type. Source parameters are checked contravariantly and source returns covariantly.
 _Avoid_: `inspect.Signature` identity, callable runtime value
