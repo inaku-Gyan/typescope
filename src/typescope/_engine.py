@@ -617,6 +617,13 @@ def _typevar_accepts_reverse(  # noqa: PLR0911, PLR0912 - explicit constraint br
 ) -> _Decision:
     """Bind a destination TypeVar discovered through a contravariant edge."""
 
+    if _is_special(source, SpecialType.UNKNOWN):
+        typevar_expression = NormalizedType(
+            NormalizedKind.TYPEVAR,
+            typevar,
+        )
+        return _evaluate(typevar_expression, source, context, path)
+
     existing = context.typevar_bindings.get(typevar)
     if existing is not None:
         return _evaluate(existing, source, context, path + ("typevar.binding",))
