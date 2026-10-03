@@ -66,7 +66,7 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} pytest --cov=typescope --cov-fail-under=70 --cov-report=term-missing --cov-report=xml:coverage.xml
       - name: Retain designated coverage report
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.xml
@@ -110,7 +110,7 @@ jobs:
       - name: Verify distributions
         run: just verify-dist
       - name: Retain distributions
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: distributions
           path: dist/
