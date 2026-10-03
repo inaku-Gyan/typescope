@@ -213,11 +213,7 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     context: EvaluationContext,
     path: tuple[str, ...],
 ) -> _Decision | None:
-    if _is_special(source, SpecialType.ANY) or _is_special(
-        destination, SpecialType.ANY
-    ):
-        return _assignable(path + ("special.any",))
-    if _is_special(source, SpecialType.UNKNOWN) or _is_special(
+    if _contains_special(source, SpecialType.UNKNOWN) or _contains_special(
         destination, SpecialType.UNKNOWN
     ):
         if context.unknown_as_any:
@@ -230,6 +226,10 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
             reason_code="assignability.unknown_type",
             rule_source=RuleSource.EXTENSION,
         )
+    if _is_special(source, SpecialType.ANY) or _is_special(
+        destination, SpecialType.ANY
+    ):
+        return _assignable(path + ("special.any",))
     if source == destination and not (
         _contains_special(source, SpecialType.UNKNOWN)
         or _contains_special(destination, SpecialType.UNKNOWN)
