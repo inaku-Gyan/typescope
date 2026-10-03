@@ -218,15 +218,19 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
         unknown_path = _find_special_path(destination, SpecialType.UNKNOWN)
     if unknown_path is not None:
         if context.unknown_as_any:
-            return _assignable(
-                path + unknown_path + ("special.unknown_as_any",),
-                rule_source=RuleSource.CHECKER,
+            if _is_special(source, SpecialType.UNKNOWN) or _is_special(
+                destination, SpecialType.UNKNOWN
+            ):
+                return _assignable(
+                    path + unknown_path + ("special.unknown_as_any",),
+                    rule_source=RuleSource.CHECKER,
+                )
+        else:
+            return _not_assignable(
+                path + unknown_path + ("special.unknown",),
+                reason_code="assignability.unknown_type",
+                rule_source=RuleSource.EXTENSION,
             )
-        return _not_assignable(
-            path + unknown_path + ("special.unknown",),
-            reason_code="assignability.unknown_type",
-            rule_source=RuleSource.EXTENSION,
-        )
     if _is_special(source, SpecialType.ANY) or _is_special(
         destination, SpecialType.ANY
     ):

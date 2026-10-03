@@ -284,6 +284,9 @@ def generic_variances(origin: type[Any]) -> tuple[str, ...] | None:
 
 
 def _generic_arity(origin: type[Any]) -> int:
+    parameters = _generic_parameters(origin)
+    if parameters:
+        return len(parameters)
     variances = _generic_variances(origin)
     if variances is not None:
         return len(variances)
@@ -315,6 +318,8 @@ def _normalize_generic(
         )
     if not arguments:
         arguments = _implicit_arguments(origin)
+    else:
+        _validate_generic_arguments(origin, arguments)
 
     normalized_arguments: list[NormalizedType] = []
     for argument in arguments:
@@ -350,6 +355,28 @@ def _is_empty_tuple_expression(expression: Any) -> bool:
 
     bare_tuple = getattr(typing, "Tuple", None)
     return expression is not bare_tuple and not typing.get_args(expression)
+
+
+def _validate_generic_arguments(origin: type[Any], arguments: tuple[Any, ...]) -> None:
+    """Reject malformed fixed-arity forms before semantic comparison."""
+
+    if origin is tuple:
+        has_ellipsis = any(argument is Ellipsis for argument in arguments)
+        if has_ellipsis and not (
+            len(arguments) == 1 or (len(arguments) == 2 and arguments[-1] is Ellipsis)
+        ):
+            raise NormalizationError(
+                "normalization.generic_arity",
+                "tuple ellipsis must be the second and final argument",
+            )
+        return
+
+    arity = _generic_arity(origin)
+    if arity and len(arguments) != arity:
+        raise NormalizationError(
+            "normalization.generic_arity",
+            f"{origin!r} expects {arity} generic argument(s), got {len(arguments)}",
+        )
 
 
 _PROJECTION_IDENTITY = "identity"
