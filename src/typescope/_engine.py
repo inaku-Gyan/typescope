@@ -609,6 +609,13 @@ def _expand_generic_shape(
         destination_item = destination[0]
         if source_variadic:
             return (source[:1], (destination_item,))
+        if not source:
+            empty_source = NormalizedType(
+                NormalizedKind.SPECIAL,
+                SpecialType.NEVER,
+                provenance=destination_item.provenance,
+            )
+            return ((empty_source,), (destination_item,))
         return (source, (destination_item,) * len(source))
     if source_variadic:
         return (None, None)

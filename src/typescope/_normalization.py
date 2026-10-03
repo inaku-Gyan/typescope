@@ -162,7 +162,7 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
                 state=state,
             )
         if _has_generic_base(expression):
-            if getattr(expression, "__parameters__", ()):
+            if _generic_parameters(expression):
                 return _normalize_generic(
                     expression,
                     (),
@@ -181,9 +181,12 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
         )
 
     if origin is not None and _is_generic_origin(origin):
+        arguments = typing.get_args(expression)
+        if origin is tuple and not arguments and _is_empty_tuple_expression(expression):
+            arguments = (_EMPTY_TUPLE,)
         return _normalize_generic(
             origin,
-            typing.get_args(expression),
+            arguments,
             provenance=provenance,
             state=state,
         )
@@ -205,6 +208,7 @@ def _carrier_name(expression: Any) -> str:
 _INVARIANT = ("invariant",)
 _COVARIANT = ("covariant",)
 _IMPLICIT_UNKNOWN = object()
+_EMPTY_TUPLE = object()
 _KNOWN_GENERIC_VARIANCES: dict[type[Any], tuple[str, ...]] = {
     list: _INVARIANT,
     dict: ("invariant", "invariant"),
@@ -304,6 +308,13 @@ def _normalize_generic(
     provenance: RepresentationProvenance,
     state: NormalizationBudget,
 ) -> NormalizedType:
+    if len(arguments) == 1 and arguments[0] is _EMPTY_TUPLE:
+        return NormalizedType(
+            NormalizedKind.GENERIC,
+            origin,
+            members=(),
+            provenance=provenance,
+        )
     if not arguments:
         arguments = _implicit_arguments(origin)
 
@@ -334,6 +345,12 @@ def _normalize_generic(
         members=tuple(normalized_arguments),
         provenance=provenance,
     )
+
+
+def _is_empty_tuple_expression(expression: Any) -> bool:
+    """Recognize the public empty-tuple spellings without carrier checks."""
+
+    return getattr(expression, "__args__", None) == ()
 
 
 _PROJECTION_IDENTITY = "identity"
