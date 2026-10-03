@@ -34,6 +34,11 @@ The native profile uses `unknown_as_opaque`; an explicit checker profile may use
 type, including another implicit Unknown. In the latter it has the bidirectional behavior of
 `Any`. Explicit `typing.Any` is unaffected by this choice.
 
+The first checker-compatible profile is exposed as
+`typescope-checker/unknown-as-any/1`; it changes only implicit Unknown handling and labels the
+resulting rule as checker provenance. It does not claim compatibility with a particular external
+checker.
+
 `TypeVar` identity is preserved within a normalized expression. Repeated occurrences of the
 same variable share one binding. A destination variable may bind to a source that satisfies its
 bound or one of its constraints. A source variable is assignable to a destination only when all

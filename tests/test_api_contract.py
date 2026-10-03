@@ -4,6 +4,7 @@ import pytest
 
 from typescope import (
     NATIVE_PROFILE,
+    UNKNOWN_AS_ANY_PROFILE,
     AssignabilityCapabilityError,
     AssignabilityStatus,
     evaluate_assignability,
@@ -23,7 +24,7 @@ def test_structured_evaluation_preserves_a_definite_result() -> None:
 
 def test_unknown_policy_defaults_to_an_exception() -> None:
     with pytest.raises(AssignabilityCapabilityError) as raised:
-        is_assignable(list[int], list[str])
+        is_assignable(object(), int)
 
     assert raised.value.result.status is AssignabilityStatus.UNKNOWN
     assert raised.value.result.reason_code == "normalization.expression_unsupported"
@@ -37,7 +38,7 @@ def test_unknown_policy_can_be_selected(
     policy: Literal["return_none", "return_true", "return_false"],
     expected: bool | None,
 ) -> None:
-    assert is_assignable(list[int], list[str], on_unknown=policy) is expected
+    assert is_assignable(object(), int, on_unknown=policy) is expected
 
 
 def test_unknown_profile_is_not_a_definite_negative() -> None:
@@ -53,6 +54,19 @@ def test_unknown_profile_is_not_a_definite_negative() -> None:
 def test_any_remains_assignable_in_the_native_profile() -> None:
     assert is_assignable(Any, int)
     assert is_assignable(int, Any)
+
+
+def test_checker_unknown_profile_treats_implicit_unknown_as_any() -> None:
+    result = evaluate_assignability(
+        list,
+        list[int],
+        profile=UNKNOWN_AS_ANY_PROFILE,
+    )
+
+    assert result.status is AssignabilityStatus.ASSIGNABLE
+    assert result.profile == UNKNOWN_AS_ANY_PROFILE
+    assert result.rule_source == "checker"
+    assert is_assignable(list, list[int], profile=UNKNOWN_AS_ANY_PROFILE)
 
 
 def test_never_is_a_bottom_type() -> None:

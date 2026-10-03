@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,10 +17,13 @@ from ._normalization import (
     NormalizedKind,
     NormalizedType,
     SpecialType,
+    generic_variances,
     normalize_type_expression,
+    project_generic_arguments,
 )
 from ._result import (
     NATIVE_PROFILE,
+    UNKNOWN_AS_ANY_PROFILE,
     AssignabilityResult,
     AssignabilityStatus,
     RuleSource,
@@ -34,6 +38,7 @@ class EvaluationContext:
 
     profile: str
     config: AssignabilityConfig
+    unknown_as_any: bool = False
     normalization_budget: NormalizationBudget = field(
         default_factory=NormalizationBudget
     )
@@ -41,6 +46,7 @@ class EvaluationContext:
     visited_pairs: set[tuple[NormalizedType, NormalizedType]] = field(
         default_factory=set
     )
+    typevar_bindings: dict[typing.TypeVar, NormalizedType] = field(default_factory=dict)
     current_rule_path: tuple[str, ...] = ()
     capability_evidence: list[str] = field(default_factory=list)
     representation_provenance: list[str] = field(default_factory=list)
@@ -85,6 +91,7 @@ def evaluate_native(
     context = EvaluationContext(
         profile=profile,
         config=make_assignability_config(config),
+        unknown_as_any=profile == UNKNOWN_AS_ANY_PROFILE,
     )
     try:
         normalized_source = normalize_type_expression(
@@ -126,14 +133,34 @@ def evaluate_native(
             evidence=tuple(context.capability_evidence),
         )
 
-    return _evaluate(normalized_source, normalized_destination, context).as_result(
+    try:
+        decision = _evaluate(normalized_source, normalized_destination, context)
+    except NormalizationError as exc:
+        context.capability_evidence.append(exc.reason_code)
+        decision = _Decision(
+            AssignabilityStatus.UNKNOWN,
+            rule_source=RuleSource.EXTENSION,
+            rule_path=("normalization",),
+            reason_code=exc.reason_code,
+            detail=exc.detail,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        context.capability_evidence.append("normalization.expression_unsupported")
+        decision = _Decision(
+            AssignabilityStatus.UNKNOWN,
+            rule_source=RuleSource.EXTENSION,
+            rule_path=("normalization",),
+            reason_code="normalization.expression_unsupported",
+            detail=str(exc) or type(exc).__name__,
+        )
+    return decision.as_result(
         profile,
         provenance=tuple(context.representation_provenance),
         evidence=tuple(context.capability_evidence),
     )
 
 
-def _evaluate(
+def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
     source: NormalizedType,
     destination: NormalizedType,
     context: EvaluationContext,
@@ -158,34 +185,401 @@ def _evaluate(
             "assignability evaluation encountered a recursive comparison",
         )
     context.visited_pairs.add(pair)
+    try:
+        special = _evaluate_specials(source, destination, context, path)
+        if special is not None:
+            return special
 
-    special = _evaluate_specials(source, destination, path)
-    if special is not None:
-        return special
+        union = _evaluate_unions(source, destination, context, path)
+        if union is not None:
+            return union
 
-    union = _evaluate_unions(source, destination, context, path)
-    if union is not None:
-        return union
+        generic = _evaluate_generics(source, destination, context, path)
+        if generic is not None:
+            return generic
 
-    return _evaluate_classes(source, destination, context, path)
+        typevar = _evaluate_typevars(source, destination, context, path)
+        if typevar is not None:
+            return typevar
+
+        return _evaluate_classes(source, destination, context, path)
+    finally:
+        context.visited_pairs.remove(pair)
 
 
-def _evaluate_specials(
+def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     source: NormalizedType,
     destination: NormalizedType,
+    context: EvaluationContext,
     path: tuple[str, ...],
 ) -> _Decision | None:
     if _is_special(source, SpecialType.ANY) or _is_special(
         destination, SpecialType.ANY
     ):
         return _assignable(path + ("special.any",))
-    if source == destination:
+    if _is_special(source, SpecialType.UNKNOWN) or _is_special(
+        destination, SpecialType.UNKNOWN
+    ):
+        if context.unknown_as_any:
+            return _assignable(
+                path + ("special.unknown_as_any",),
+                rule_source=RuleSource.CHECKER,
+            )
+        return _not_assignable(
+            path + ("special.unknown",),
+            reason_code="assignability.unknown_type",
+            rule_source=RuleSource.EXTENSION,
+        )
+    if source == destination and not (
+        _contains_special(source, SpecialType.UNKNOWN)
+        or _contains_special(destination, SpecialType.UNKNOWN)
+    ):
         return _assignable(path + ("identity",))
     if _is_special(source, SpecialType.NEVER):
         return _assignable(path + ("special.never.source",))
     if _is_special(destination, SpecialType.NEVER):
         return _not_assignable(path + ("special.never.destination",))
     return _evaluate_none(source, destination, path)
+
+
+def _evaluate_generics(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision | None:
+    source_is_generic = source.kind is NormalizedKind.GENERIC
+    destination_is_generic = destination.kind is NormalizedKind.GENERIC
+    if not source_is_generic and not destination_is_generic:
+        return None
+
+    if source_is_generic and destination_is_generic:
+        return _evaluate_generic_to_generic(source, destination, context, path)
+
+    if source_is_generic:
+        return _evaluate_generic_to_class(source, destination, context, path)
+
+    # A bare class carries no evidence for the destination's type arguments.
+    # Keep nominal subclassing useful, but never invent an argument binding.
+    return _evaluate_class_to_generic(source, destination, context, path)
+
+
+def _evaluate_generic_to_generic(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    source_origin = source.value
+    destination_origin = destination.value
+    assert isinstance(source_origin, type)
+    assert isinstance(destination_origin, type)
+
+    projected = project_generic_arguments(
+        source_origin,
+        source.members,
+        destination_origin,
+        budget_state=context.normalization_budget,
+    )
+    if projected is not None:
+        return _compare_generic_arguments(
+            projected,
+            destination.members,
+            destination_origin,
+            context,
+            path,
+        )
+
+    try:
+        related = issubclass(source_origin, destination_origin)
+    except TypeError:
+        related = False
+    if related:
+        return _unknown(
+            context,
+            path + ("generic.inheritance",),
+            "generic.inheritance_unknown",
+            "generic inheritance arguments could not be projected",
+        )
+    return _not_assignable(path + ("generic.origin_mismatch",))
+
+
+def _evaluate_generic_to_class(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    source_origin = source.value
+    destination_class = destination.value
+    assert isinstance(source_origin, type)
+    if destination.kind is not NormalizedKind.CLASS:
+        return _unknown(
+            context,
+            path,
+            "normalization.expression_unsupported",
+            "the normalized generic destination is outside the native spine",
+        )
+    assert isinstance(destination_class, type)
+    try:
+        related = issubclass(source_origin, destination_class)
+    except TypeError as exc:
+        return _unknown(context, path, "normalization.expression_unsupported", str(exc))
+    return (
+        _assignable(path + ("generic.nominal",))
+        if related
+        else _not_assignable(path + ("nominal.mismatch",))
+    )
+
+
+def _evaluate_class_to_generic(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    source_class = source.value
+    destination_origin = destination.value
+    assert isinstance(source_class, type)
+    assert isinstance(destination_origin, type)
+    try:
+        related = issubclass(source_class, destination_origin)
+    except TypeError as exc:
+        return _unknown(context, path, "normalization.expression_unsupported", str(exc))
+    if not related:
+        return _not_assignable(path + ("generic.origin_mismatch",))
+    return _unknown(
+        context,
+        path + ("generic.arguments",),
+        "generic.arguments_missing",
+        "the source class has no runtime evidence for generic arguments",
+    )
+
+
+def _evaluate_typevars(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision | None:
+    source_is_typevar = source.kind is NormalizedKind.TYPEVAR
+    destination_is_typevar = destination.kind is NormalizedKind.TYPEVAR
+    if not source_is_typevar and not destination_is_typevar:
+        return None
+    if source_is_typevar and destination_is_typevar:
+        return _unknown(
+            context,
+            path + ("typevar.identity",),
+            "typevar.binding_unknown",
+            "independent TypeVars cannot be unified without binding evidence",
+        )
+
+    if destination_is_typevar:
+        typevar = destination.value
+        assert isinstance(typevar, typing.TypeVar)
+        return _typevar_accepts(source, typevar, context, path)
+
+    typevar = source.value
+    assert isinstance(typevar, typing.TypeVar)
+    return _typevar_produces(typevar, destination, context, path)
+
+
+def _typevar_accepts(
+    source: NormalizedType,
+    typevar: typing.TypeVar,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    constraints = typevar.__constraints__
+    existing = context.typevar_bindings.get(typevar)
+    if existing is not None:
+        return _evaluate(source, existing, context, path + ("typevar.binding",))
+    if constraints:
+        unknown: _Decision | None = None
+        for index, constraint in enumerate(constraints):
+            candidate = _normalize_typevar_target(constraint, context)
+            decision = _evaluate(
+                source,
+                candidate,
+                context,
+                path + (f"typevar.constraint[{index}]",),
+            )
+            if decision.status is AssignabilityStatus.ASSIGNABLE:
+                return decision
+            if decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = decision
+        return unknown or _not_assignable(path + ("typevar.constraints",))
+
+    if typevar.__bound__ is not None:
+        bound = _normalize_typevar_target(typevar.__bound__, context)
+        decision = _evaluate(source, bound, context, path + ("typevar.bound",))
+        if decision.status is not AssignabilityStatus.ASSIGNABLE:
+            return decision
+    context.typevar_bindings[typevar] = source
+    return _assignable(path + ("typevar.bind",))
+
+
+def _typevar_produces(  # noqa: PLR0911 - ordered TypeVar evidence rules
+    typevar: typing.TypeVar,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    existing = context.typevar_bindings.get(typevar)
+    if existing is not None:
+        return _evaluate(existing, destination, context, path + ("typevar.binding",))
+
+    constraints = typevar.__constraints__
+    if constraints:
+        unknown: _Decision | None = None
+        for index, constraint in enumerate(constraints):
+            decision = _evaluate(
+                _normalize_typevar_target(constraint, context),
+                destination,
+                context,
+                path + (f"typevar.constraint[{index}]",),
+            )
+            if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+                return decision
+            if decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = decision
+        return unknown or _assignable(path + ("typevar.constraints",))
+
+    if typevar.__bound__ is not None:
+        return _evaluate(
+            _normalize_typevar_target(typevar.__bound__, context),
+            destination,
+            context,
+            path + ("typevar.bound",),
+        )
+
+    no_default = getattr(typing, "NoDefault", object())
+    default = getattr(typevar, "__default__", no_default)
+    if default is not no_default:
+        return _evaluate(
+            _normalize_typevar_target(default, context),
+            destination,
+            context,
+            path + ("typevar.default",),
+        )
+    return _unknown(
+        context,
+        path + ("typevar",),
+        "typevar.binding_unknown",
+        "a free source TypeVar has no bound, constraint, or default",
+    )
+
+
+def _normalize_typevar_target(
+    expression: Any,
+    context: EvaluationContext,
+) -> NormalizedType:
+    return normalize_type_expression(
+        expression,
+        budget_state=context.normalization_budget,
+    )
+
+
+def _normalize_runtime_value(
+    expression: object,
+    context: EvaluationContext,
+) -> NormalizedType:
+    return normalize_type_expression(
+        expression,
+        budget_state=context.normalization_budget,
+    )
+
+
+def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
+    source: tuple[NormalizedType, ...],
+    destination: tuple[NormalizedType, ...],
+    destination_origin: type[Any],
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    source_args, destination_args = _expand_generic_shape(source, destination)
+    if source_args is None or destination_args is None:
+        return _unknown(
+            context,
+            path + ("generic.arguments",),
+            "generic.arity_unknown",
+            "generic argument arity could not be compared safely",
+        )
+    if len(source_args) != len(destination_args):
+        return _not_assignable(path + ("generic.arity",))
+
+    variances = generic_variances(destination_origin)
+    if variances is not None and len(variances) == 1 and len(destination_args) > 1:
+        variances = variances * len(destination_args)
+    if variances is None or len(variances) != len(destination_args):
+        return _unknown(
+            context,
+            path + ("generic.arguments",),
+            "generic.variance_unknown",
+            "generic variance metadata is unavailable",
+        )
+
+    unknown: _Decision | None = None
+    rule_source = RuleSource.STANDARD
+    for index, (source_arg, destination_arg, variance) in enumerate(
+        zip(source_args, destination_args, variances, strict=True)
+    ):
+        argument_path = path + (f"generic.argument[{index}]",)
+        if variance == "covariant":
+            decision = _evaluate(source_arg, destination_arg, context, argument_path)
+        elif variance == "contravariant":
+            decision = _evaluate(destination_arg, source_arg, context, argument_path)
+        else:
+            forward = _evaluate(source_arg, destination_arg, context, argument_path)
+            reverse = (
+                forward
+                if source_arg == destination_arg
+                else _evaluate(destination_arg, source_arg, context, argument_path)
+            )
+            if (
+                forward.status is AssignabilityStatus.NOT_ASSIGNABLE
+                or reverse.status is AssignabilityStatus.NOT_ASSIGNABLE
+            ):
+                if any(
+                    decision.reason_code == "assignability.unknown_type"
+                    for decision in (forward, reverse)
+                ):
+                    return _not_assignable(
+                        argument_path + ("invariant",),
+                        reason_code="assignability.unknown_type",
+                        rule_source=RuleSource.EXTENSION,
+                    )
+                return _not_assignable(argument_path + ("invariant",))
+            decision = (
+                forward if forward.status is AssignabilityStatus.UNKNOWN else reverse
+            )
+        if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+            return decision
+        if decision.status is AssignabilityStatus.UNKNOWN:
+            unknown = decision
+        if decision.rule_source is RuleSource.CHECKER:
+            rule_source = RuleSource.CHECKER
+    return unknown or _assignable(path + ("generic",), rule_source=rule_source)
+
+
+def _expand_generic_shape(
+    source: tuple[NormalizedType, ...],
+    destination: tuple[NormalizedType, ...],
+) -> tuple[tuple[NormalizedType, ...] | None, tuple[NormalizedType, ...] | None]:
+    source_variadic = _is_ellipsis_argument(source)
+    destination_variadic = _is_ellipsis_argument(destination)
+    if destination_variadic:
+        destination_item = destination[0]
+        if source_variadic:
+            return (source[:1], (destination_item,))
+        return (source, (destination_item,) * len(source))
+    if source_variadic:
+        return (None, None)
+    return source, destination
+
+
+def _is_ellipsis_argument(arguments: tuple[NormalizedType, ...]) -> bool:
+    return bool(arguments) and _is_special(arguments[-1], SpecialType.ELLIPSIS)
 
 
 def _evaluate_none(
@@ -313,20 +707,35 @@ def _is_special(expression: NormalizedType, special: SpecialType) -> bool:
     return expression.kind is NormalizedKind.SPECIAL and expression.value is special
 
 
-def _assignable(path: tuple[str, ...]) -> _Decision:
+def _contains_special(expression: NormalizedType, special: SpecialType) -> bool:
+    return _is_special(expression, special) or any(
+        _contains_special(member, special) for member in expression.members
+    )
+
+
+def _assignable(
+    path: tuple[str, ...],
+    *,
+    rule_source: RuleSource = RuleSource.STANDARD,
+) -> _Decision:
     return _Decision(
         AssignabilityStatus.ASSIGNABLE,
-        rule_source=RuleSource.STANDARD,
+        rule_source=rule_source,
         rule_path=path,
     )
 
 
-def _not_assignable(path: tuple[str, ...]) -> _Decision:
+def _not_assignable(
+    path: tuple[str, ...],
+    *,
+    reason_code: str = "assignability.not_assignable",
+    rule_source: RuleSource = RuleSource.STANDARD,
+) -> _Decision:
     return _Decision(
         AssignabilityStatus.NOT_ASSIGNABLE,
-        rule_source=RuleSource.STANDARD,
+        rule_source=rule_source,
         rule_path=path,
-        reason_code="assignability.not_assignable",
+        reason_code=reason_code,
     )
 
 

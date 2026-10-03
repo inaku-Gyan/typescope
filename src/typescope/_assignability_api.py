@@ -6,6 +6,7 @@ from ._assignability_config import AssignabilityConfigDict
 from ._engine import evaluate_native
 from ._result import (
     NATIVE_PROFILE,
+    UNKNOWN_AS_ANY_PROFILE,
     AssignabilityCapabilityError,
     AssignabilityResult,
     AssignabilityStatus,
@@ -16,6 +17,7 @@ from ._result import (
 __all__ = ["evaluate_assignability", "is_assignable"]
 
 _UNKNOWN_POLICIES = frozenset(("return_none", "return_true", "return_false", "raise"))
+_SUPPORTED_PROFILES = frozenset((NATIVE_PROFILE, UNKNOWN_AS_ANY_PROFILE))
 
 
 def evaluate_assignability(
@@ -31,7 +33,7 @@ def evaluate_assignability(
     as a definite negative answer.
     """
 
-    if profile != NATIVE_PROFILE:
+    if profile not in _SUPPORTED_PROFILES:
         return AssignabilityResult(
             AssignabilityStatus.UNKNOWN,
             profile=profile,
@@ -53,7 +55,7 @@ def _evaluate_with_config(
 ) -> AssignabilityResult:
     """Evaluate with the temporary compatibility config used by old callers."""
 
-    if profile != NATIVE_PROFILE:
+    if profile not in _SUPPORTED_PROFILES:
         return AssignabilityResult(
             AssignabilityStatus.UNKNOWN,
             profile=profile,

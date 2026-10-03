@@ -1,12 +1,170 @@
-# ruff: noqa: UP007, UP045
+# ruff: noqa: UP006, UP007, UP045
 
+import typing
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Literal, TypeVar
+
+import pytest
+
+from typescope import evaluate_assignability
 from typescope import is_assignable as ia
 
 
 def test_basic_builtin_generic_types() -> None:
     """Tests for basic builtin generic types like list, dict, etc."""
-    assert ia(list, list)
+    assert not ia(list, list)
     assert not ia(list, dict)
 
-    # assert ia(list[int], list[int])
-    # assert not ia(list[int], list[str])
+
+@pytest.mark.parametrize(
+    ("source", "destination"),
+    [
+        (typing.List[int], list[int]),
+        (list[int], typing.List[int]),
+        (dict[str, int], typing.Dict[str, int]),
+        (Sequence[int], Sequence[int]),
+    ],
+)
+def test_equivalent_generic_carriers_share_semantics(
+    source: object, destination: object
+) -> None:
+    assert ia(source, destination)
+
+
+def test_invariant_builtin_generics_require_both_arguments_to_match() -> None:
+    assert not ia(list[int], list[object])
+    assert not ia(list[object], list[int])
+    assert not ia(dict[str, int], dict[object, int])
+    assert not ia(dict[str, object], dict[str, int])
+
+
+def test_covariant_abstract_containers_accept_narrower_values() -> None:
+    assert ia(Sequence[int], Sequence[object])
+    assert ia(Iterable[int], Iterable[object])
+    assert ia(Mapping[str, int], Mapping[object, object])
+    assert not ia(Sequence[object], Sequence[int])
+
+
+def test_contravariant_user_generic_reverses_argument_direction() -> None:
+    consumer_type_contra = TypeVar("consumer_type_contra", contravariant=True)
+
+    # A real Generic declaration exposes the same public TypeVar metadata while
+    # avoiding a dependency on implementation-specific typing classes.
+    from typing import Generic
+
+    class GenericConsumer(Generic[consumer_type_contra]):
+        pass
+
+    assert ia(GenericConsumer[object], GenericConsumer[int])
+    assert not ia(GenericConsumer[int], GenericConsumer[object])
+
+
+def test_covariant_user_generic_follows_typevar_metadata() -> None:
+    from typing import Generic
+
+    value_type_co = TypeVar("value_type_co", covariant=True)
+
+    class Box(Generic[value_type_co]):
+        pass
+
+    assert ia(Box[int], Box[object])
+    assert not ia(Box[object], Box[int])
+
+
+def test_generic_inheritance_projects_arguments_to_abstract_destination() -> None:
+    assert ia(list[int], Sequence[object])
+    assert ia(dict[str, int], Mapping[object, object])
+    assert ia(tuple[int, ...], Sequence[object])
+
+
+def test_user_generic_inheritance_projects_typevar_bindings() -> None:
+    from typing import Generic
+
+    inherited_value_type = TypeVar("inherited_value_type")
+
+    class Base(Generic[inherited_value_type]):
+        pass
+
+    class Child(Base[inherited_value_type], Generic[inherited_value_type]):
+        pass
+
+    assert ia(Child[int], Base[int])
+    assert not ia(Child[int], Base[str])
+
+
+def test_unresolvable_generic_inheritance_is_structured_unknown() -> None:
+    from typing import Generic
+
+    value_type = TypeVar("value_type")
+
+    class Base(Generic[value_type]):
+        pass
+
+    class Broken(Base[Literal[1]]):
+        pass
+
+    result = evaluate_assignability(Broken, Base[int])
+
+    assert result.status == "unknown"
+    assert result.reason_code == "normalization.expression_unsupported"
+
+
+def test_missing_generic_inheritance_arguments_are_unknown() -> None:
+    from typing import Generic
+
+    value_type = TypeVar("value_type")
+
+    class Base(Generic[value_type]):
+        pass
+
+    class Child(Base, Generic[value_type]):
+        pass
+
+    result = evaluate_assignability(Child[int], Base[int])
+
+    assert result.status == "unknown"
+    assert result.reason_code == "generic.inheritance_unknown"
+
+
+def test_typevar_identity_bounds_and_constraints_are_preserved() -> None:
+    bounded_type = TypeVar("bounded_type", bound=int)
+    constrained_type = TypeVar("constrained_type", int, str)
+    free_type = TypeVar("free_type")
+
+    assert ia(bounded_type, bounded_type)
+    assert ia(int, bounded_type)
+    assert ia(bounded_type, int)
+    assert not ia(bounded_type, str)
+    assert ia(constrained_type, object)
+    assert not ia(bool, constrained_type)
+    assert ia(free_type, int, on_unknown="return_none") is None
+
+
+def test_repeated_destination_typevar_uses_one_binding() -> None:
+    from typing import Generic
+
+    first_type = TypeVar("first_type")
+    second_type = TypeVar("second_type")
+    shared_type = TypeVar("shared_type")
+
+    class Pair(Generic[first_type, second_type]):
+        pass
+
+    class SharedPair(Generic[shared_type]):
+        pass
+
+    assert ia(Pair[int, int], Pair[shared_type, shared_type])
+    assert not ia(Pair[int, str], Pair[shared_type, shared_type])
+
+
+def test_omitted_generic_arguments_are_distinct_from_explicit_any() -> None:
+    result = evaluate_assignability(typing.List, typing.List[int])
+
+    assert not ia(typing.List, typing.List[int])
+    assert not ia(typing.List, typing.List)
+    assert not ia(list, list[int])
+    assert not ia(list[int], list)
+    assert result.rule_source == "extension"
+    assert result.reason_code == "assignability.unknown_type"
+    assert ia(list[Any], list[int])
+    assert ia(list[int], list[Any])

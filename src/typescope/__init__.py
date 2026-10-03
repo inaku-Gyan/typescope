@@ -11,6 +11,7 @@ from ._assignability_api import evaluate_assignability, is_assignable
 from ._assignability_config import AssignabilityConfigDict
 from ._result import (
     NATIVE_PROFILE,
+    UNKNOWN_AS_ANY_PROFILE,
     AssignabilityCapabilityError,
     AssignabilityResult,
     AssignabilityStatus,
@@ -26,4 +27,5 @@ __all__ = [
     "AssignabilityStatus",
     "NATIVE_PROFILE",
     "RuleSource",
+    "UNKNOWN_AS_ANY_PROFILE",
 ]

@@ -9,12 +9,14 @@ __all__ = [
     "AssignabilityResult",
     "AssignabilityStatus",
     "NATIVE_PROFILE",
+    "UNKNOWN_AS_ANY_PROFILE",
     "RuleSource",
     "UnknownPolicy",
 ]
 
 
-NATIVE_PROFILE: Final = "typescope-native/1"
+NATIVE_PROFILE: Final = "typescope-native/2"
+UNKNOWN_AS_ANY_PROFILE: Final = "typescope-checker/unknown-as-any/1"
 UnknownPolicy = Literal["return_none", "return_true", "return_false", "raise"]
 
 
