@@ -96,6 +96,22 @@ _Avoid_: representation identity, display name
 The boundary operation that maps a type expression into a normalized type form and representation provenance using public introspection and feature detection.
 _Avoid_: casting, runtime value inspection
 
+**Literal identity**:
+The semantic identity of a `Literal` form, combining its exact value and exact value type. A literal may be assignable to a compatible ordinary type, but an ordinary type does not become assignable to a specific literal without evidence; equal values with different types, such as `0` and `False`, remain distinct.
+_Avoid_: runtime equality alone
+
+**Variadic type variable**:
+A `TypeVarTuple` or `Unpack` form whose binding may represent zero or more type arguments. Fully concrete expansion can be compared as a tuple shape; unresolved length, splitting, or rebinding is capability unknown.
+_Avoid_: omitted generic argument, implicit Unknown
+
+**Type predicate marker**:
+A `TypeGuard[T]` or `TypeIs[T]` return annotation that carries type-narrowing behavior in a callable signature. It is not an ordinary container type; its relation to `bool`, its marker kind, and its target binding are evaluated only in the supported callable-return contexts.
+_Avoid_: boolean runtime result, ordinary generic
+
+**NewType wrapper**:
+A nominal subtype declaration that preserves its declared identity while exposing an underlying type. The wrapper is assignable to its underlying type, while the underlying type is not assignable back to the wrapper without an explicit wrapper or equivalent evidence.
+_Avoid_: transparent type alias
+
 **Alias provenance**:
 The retained chain of type-alias declarations and source carriers encountered while normalizing an alias. Alias provenance explains diagnostics while the alias target supplies native semantic identity.
 _Avoid_: alias identity as assignability
