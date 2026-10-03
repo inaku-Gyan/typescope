@@ -8,6 +8,16 @@ from .typing import get_union_items, is_none_type, is_union
 __all__ = ["is_assignable"]
 
 
+def _evaluate_legacy(
+    source_type: Any,
+    dest_type: Any,
+    config: _ConfigDict | None = None,
+) -> bool:
+    """Evaluate using the temporary legacy core behind the new result API."""
+
+    return _is_assignable_core(source_type, dest_type, _make_config(config))
+
+
 def is_assignable(
     source_type: Any, dest_type: Any, config: _ConfigDict | None = None
 ) -> bool:
