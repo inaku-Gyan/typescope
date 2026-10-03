@@ -89,6 +89,12 @@ def test_fixed_tuple_projects_its_element_union_to_sequence() -> None:
     assert not ia(tuple[int, str], Sequence[int])
 
 
+def test_empty_tuple_is_a_fixed_shape_with_no_element_requirements() -> None:
+    assert ia(tuple[()], Sequence[int])
+    assert ia(tuple[()], tuple[int, ...])
+    assert not ia(tuple[()], tuple[int])
+
+
 def test_user_generic_inheritance_projects_typevar_bindings() -> None:
     from typing import Generic
 
