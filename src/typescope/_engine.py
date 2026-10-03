@@ -213,16 +213,17 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     context: EvaluationContext,
     path: tuple[str, ...],
 ) -> _Decision | None:
-    if _contains_special(source, SpecialType.UNKNOWN) or _contains_special(
-        destination, SpecialType.UNKNOWN
-    ):
+    unknown_path = _find_special_path(source, SpecialType.UNKNOWN)
+    if unknown_path is None:
+        unknown_path = _find_special_path(destination, SpecialType.UNKNOWN)
+    if unknown_path is not None:
         if context.unknown_as_any:
             return _assignable(
-                path + ("special.unknown_as_any",),
+                path + unknown_path + ("special.unknown_as_any",),
                 rule_source=RuleSource.CHECKER,
             )
         return _not_assignable(
-            path + ("special.unknown",),
+            path + unknown_path + ("special.unknown",),
             reason_code="assignability.unknown_type",
             rule_source=RuleSource.EXTENSION,
         )
@@ -231,8 +232,8 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     ):
         return _assignable(path + ("special.any",))
     if source == destination and not (
-        _contains_special(source, SpecialType.UNKNOWN)
-        or _contains_special(destination, SpecialType.UNKNOWN)
+        _find_special_path(source, SpecialType.UNKNOWN) is not None
+        or _find_special_path(destination, SpecialType.UNKNOWN) is not None
     ):
         return _assignable(path + ("identity",))
     if _is_special(source, SpecialType.NEVER):
@@ -911,10 +912,25 @@ def _is_special(expression: NormalizedType, special: SpecialType) -> bool:
     return expression.kind is NormalizedKind.SPECIAL and expression.value is special
 
 
-def _contains_special(expression: NormalizedType, special: SpecialType) -> bool:
-    return _is_special(expression, special) or any(
-        _contains_special(member, special) for member in expression.members
-    )
+def _find_special_path(
+    expression: NormalizedType,
+    special: SpecialType,
+) -> tuple[str, ...] | None:
+    """Find the first normalized path containing a special type."""
+
+    if _is_special(expression, special):
+        return ()
+    if expression.kind is NormalizedKind.UNION:
+        segment = "union.member"
+    elif expression.kind is NormalizedKind.GENERIC:
+        segment = "generic.argument"
+    else:
+        segment = "member"
+    for index, member in enumerate(expression.members):
+        member_path = _find_special_path(member, special)
+        if member_path is not None:
+            return (f"{segment}[{index}]",) + member_path
+    return None
 
 
 def _assignable(
