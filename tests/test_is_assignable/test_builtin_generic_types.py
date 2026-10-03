@@ -260,7 +260,9 @@ def test_typevar_identity_bounds_and_constraints_are_preserved() -> None:
     assert ia(bounded_type, bounded_type)
     assert ia(int, bounded_type)
     assert ia(bounded_type, int)
-    assert not ia(bounded_type, str)
+    bounded_to_str = evaluate_assignability(bounded_type, str)
+    assert bounded_to_str.status == "unknown"
+    assert bounded_to_str.reason_code == "typevar.binding_unknown"
     assert ia(constrained_type, object)
     assert not ia(bool, constrained_type)
     assert ia(free_type, int, on_unknown="return_none") is None
@@ -274,6 +276,21 @@ def test_source_typevar_constraints_require_every_permitted_instantiation() -> N
     assert result.status == "unknown"
     assert result.reason_code == "typevar.binding_unknown"
     assert ia(source_constrained_type, object)
+
+
+@pytest.mark.parametrize(
+    ("bound", "destination"),
+    [(object, str), (int, bool)],
+)
+def test_source_bounded_typevar_requires_every_permitted_instantiation(
+    bound: type[object], destination: type[object]
+) -> None:
+    source_bounded_type = TypeVar("source_bounded_type", bound=bound)
+
+    result = evaluate_assignability(source_bounded_type, destination)
+
+    assert result.status == "unknown"
+    assert result.reason_code == "typevar.binding_unknown"
 
 
 def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> (
