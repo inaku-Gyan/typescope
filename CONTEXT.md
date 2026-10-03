@@ -44,9 +44,21 @@ _Avoid_: casting, runtime value inspection
 The retained chain of type-alias declarations and source carriers encountered while normalizing an alias. Alias provenance explains diagnostics while the alias target supplies native semantic identity.
 _Avoid_: alias identity as assignability
 
-**Unknown normalization**:
-The result of normalization when a type expression cannot be resolved safely, such as an unresolved forward reference, unsupported carrier, alias cycle, or exhausted expansion budget. It carries a stable reason code and does not become `Any` or `not_assignable` implicitly.
-_Avoid_: fallback type
+**Explicit Any**:
+The `typing.Any` type expression written explicitly by the caller. It has the native bidirectional assignability rules for `Any` and is never inferred from a missing argument or a normalization failure.
+_Avoid_: implicit any, unknown type
+
+**Implicit Unknown**:
+A normalized type node created by a semantic profile when a supported generic expression omits type arguments, such as `list` interpreted as `list[Unknown]`. It is a type-system node, not an evaluation failure.
+_Avoid_: explicit Any, capability unknown
+
+**Implicit unknown mode**:
+The profile rule for the assignability of an implicit Unknown node. `unknown_as_any` gives it the bidirectional behavior of `Any`; `unknown_as_opaque` makes it non-assignable to and from every type, including another implicit Unknown.
+_Avoid_: `on_unknown`, error mode
+
+**Capability unknown**:
+The normalization result when a type expression cannot be resolved safely, such as an unresolved forward reference, unsupported carrier, alias cycle, or exhausted expansion budget. It carries a stable reason code, is distinct from an implicit Unknown node, and does not become `Any` or `not_assignable` implicitly.
+_Avoid_: fallback type, implicit any
 
 ## Semantic sources
 
