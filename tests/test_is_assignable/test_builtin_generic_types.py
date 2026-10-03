@@ -1,7 +1,7 @@
 # ruff: noqa: UP006, UP007, UP045
 
 import typing
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableSequence, Sequence
 from typing import Any, Literal, TypeVar
 
 import pytest
@@ -77,6 +77,18 @@ def test_generic_inheritance_projects_arguments_to_abstract_destination() -> Non
     assert ia(tuple[int, ...], Sequence[object])
 
 
+def test_abstract_generic_inheritance_projects_arguments_between_abc_origins() -> None:
+    assert ia(Sequence[int], Iterable[object])
+    assert ia(MutableSequence[int], Sequence[object])
+    assert ia(Mapping[str, int], Iterable[str])
+    assert not ia(Mapping[str, int], Iterable[int])
+
+
+def test_fixed_tuple_projects_its_element_union_to_sequence() -> None:
+    assert ia(tuple[int, str], Sequence[object])
+    assert not ia(tuple[int, str], Sequence[int])
+
+
 def test_user_generic_inheritance_projects_typevar_bindings() -> None:
     from typing import Generic
 
@@ -90,6 +102,23 @@ def test_user_generic_inheritance_projects_typevar_bindings() -> None:
 
     assert ia(Child[int], Base[int])
     assert not ia(Child[int], Base[str])
+
+
+def test_nested_generic_inheritance_substitutes_typevar_arguments() -> None:
+    from typing import Generic
+
+    inherited_value_type = TypeVar("nested_inherited_value_type")
+
+    class NestedBase(Generic[inherited_value_type]):
+        pass
+
+    class NestedChild(
+        NestedBase[list[inherited_value_type]], Generic[inherited_value_type]
+    ):
+        pass
+
+    assert ia(NestedChild[int], NestedBase[list[int]])
+    assert not ia(NestedChild[int], NestedBase[list[str]])
 
 
 def test_unresolvable_generic_inheritance_is_structured_unknown() -> None:
@@ -138,6 +167,30 @@ def test_typevar_identity_bounds_and_constraints_are_preserved() -> None:
     assert ia(constrained_type, object)
     assert not ia(bool, constrained_type)
     assert ia(free_type, int, on_unknown="return_none") is None
+
+
+def test_source_typevar_constraints_require_every_permitted_instantiation() -> None:
+    constrained_type = TypeVar("source_constrained_type", int, str)
+
+    result = evaluate_assignability(constrained_type, int)
+
+    assert result.status == "unknown"
+    assert result.reason_code == "typevar.binding_unknown"
+    assert ia(constrained_type, object)
+
+
+def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> None:
+    from typing import Generic
+
+    first_type = TypeVar("constrained_first_type")
+    second_type = TypeVar("constrained_second_type")
+    constrained_type = TypeVar("repeated_constrained_type", int, str)
+
+    class Pair(Generic[first_type, second_type]):
+        pass
+
+    assert ia(Pair[int, int], Pair[constrained_type, constrained_type])
+    assert not ia(Pair[int, str], Pair[constrained_type, constrained_type])
 
 
 def test_repeated_destination_typevar_uses_one_binding() -> None:
