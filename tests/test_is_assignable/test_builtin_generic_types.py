@@ -336,3 +336,13 @@ def test_implicit_unknown_does_not_become_explicit_any() -> None:
     assert reverse.reason_code == "assignability.unknown_type"
     assert ia(list, list[Any], profile="typescope-checker/unknown-as-any/1")
     assert ia(list[Any], list, profile="typescope-checker/unknown-as-any/1")
+
+
+def test_implicit_unknown_stays_opaque_through_unions() -> None:
+    result = evaluate_assignability(list | str, Any)
+    reverse = evaluate_assignability(Any, list | str)
+
+    assert result.status == "not_assignable"
+    assert result.reason_code == "assignability.unknown_type"
+    assert reverse.status == "not_assignable"
+    assert reverse.reason_code == "assignability.unknown_type"
