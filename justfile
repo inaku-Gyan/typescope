@@ -6,17 +6,18 @@ default: check
 
 # Format source and test code in place.
 format:
-    uv run ruff format {{python_sources}}
-    uv run ruff check --fix {{python_sources}}
+    uv run ruff format {{ python_sources }}
+    uv run ruff check --fix {{ python_sources }}
+    just --fmt
 
 # Check formatting and lint rules without changing files.
 lint:
-    uv run ruff format --check {{python_sources}}
-    uv run ruff check {{python_sources}}
+    uv run ruff format --check {{ python_sources }}
+    uv run ruff check {{ python_sources }}
 
 # Run the project's static type checker.
 typecheck:
-    uv run pyrefly check src tests
+    uv run pyrefly check {{ python_sources }}
 
 # Run tests without coverage instrumentation.
 test:
@@ -36,7 +37,7 @@ verify-dist:
 
 # Validate an optional v<version> tag against metadata and built artifacts.
 release-check tag="": build verify-dist
-    uv run python scripts/release_check.py "{{tag}}"
+    uv run python scripts/release_check.py "{{ tag }}"
 
 # Run the same local gates used by CI, including distribution verification.
 check: lint typecheck testcov build verify-dist
