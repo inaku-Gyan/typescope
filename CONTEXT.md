@@ -28,6 +28,18 @@ _Avoid_: semantic type, canonical type
 The version-independent semantic representation used by TypeScope to compare a type expression after inspecting public origin, arguments, special markers, and provenance. It has an explicit semantic kind such as class, special type, union, generic, type variable, callable, or protocol; a Python runtime carrier class is never its identity.
 _Avoid_: runtime class, normalized `type`
 
+**Protocol structural view**:
+The normalized set of members required by a Protocol, including its Protocol inheritance chain and the member modes needed for comparison. A concrete source may satisfy this view structurally; a Protocol source does not become assignable to a concrete destination without nominal inheritance.
+_Avoid_: runtime-checkable shape, duck typing result
+
+**Callable signature**:
+The normalized calling contract used for assignability: parameter kinds and names, requiredness, variadic parameters, and return type. Source parameters are checked contravariantly and source returns covariantly.
+_Avoid_: `inspect.Signature` identity, callable runtime value
+
+**Gradual callable parameters**:
+An explicit unknown parameter set represented by `Callable[..., R]`. It is distinct from `Any` and from a concrete parameter list; relations that cannot be safely proved from the unknown parameter set produce capability unknown.
+_Avoid_: `Callable[[Any], R]`, arbitrary signature
+
 **Representation provenance**:
 Metadata retained from the original spelling or carrier, such as `typing.Union` versus PEP 604 syntax, so diagnostics can explain equivalent forms without using them as distinct native semantics.
 _Avoid_: checker result
