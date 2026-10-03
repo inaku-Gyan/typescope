@@ -2,7 +2,7 @@
 
 import typing
 from collections.abc import Iterable, Mapping, MutableSequence, Reversible, Sequence
-from typing import Any, Literal, TypeVar
+from typing import Any, Generic, Literal, Never, TypeVar
 
 import pytest
 
@@ -63,8 +63,6 @@ def test_contravariant_user_generic_reverses_argument_direction() -> None:
 
     # A real Generic declaration exposes the same public TypeVar metadata while
     # avoiding a dependency on implementation-specific typing classes.
-    from typing import Generic
-
     class GenericConsumer(Generic[consumer_type_contra]):
         pass
 
@@ -73,8 +71,6 @@ def test_contravariant_user_generic_reverses_argument_direction() -> None:
 
 
 def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
-    from typing import Generic
-
     destination_consumer_type_contra = TypeVar(
         "destination_consumer_type_contra", contravariant=True
     )
@@ -86,8 +82,6 @@ def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
 
 
 def test_contravariant_source_typevar_is_not_bound_from_destination_evidence() -> None:
-    from typing import Generic
-
     source_consumer_type_contra = TypeVar(
         "source_consumer_type_contra", contravariant=True
     )
@@ -104,8 +98,6 @@ def test_contravariant_source_typevar_is_not_bound_from_destination_evidence() -
 
 
 def test_contravariant_source_typevar_handles_special_destinations() -> None:
-    from typing import Generic, Never
-
     source_type_contra = TypeVar("source_type_contra", contravariant=True)
 
     class GenericConsumer(Generic[source_type_contra]):
@@ -124,8 +116,6 @@ def test_contravariant_source_typevar_handles_special_destinations() -> None:
 
 
 def test_contravariant_source_typevar_checks_all_constraints() -> None:
-    from typing import Generic
-
     unknown_type_contra = TypeVar("unknown_type_contra", int, str, contravariant=True)
 
     class UnknownConsumer(Generic[unknown_type_contra]):
@@ -157,8 +147,6 @@ def test_contravariant_source_typevar_checks_all_constraints() -> None:
 
 
 def test_explicit_any_can_bind_contravariant_destination_typevar() -> None:
-    from typing import Any, Generic
-
     any_consumer_type_contra = TypeVar("any_consumer_type_contra", contravariant=True)
 
     class GenericConsumer(Generic[any_consumer_type_contra]):
@@ -168,8 +156,6 @@ def test_explicit_any_can_bind_contravariant_destination_typevar() -> None:
 
 
 def test_contravariant_typevar_does_not_bind_implicit_unknown() -> None:
-    from typing import Generic
-
     destination_unknown_consumer_type_contra = TypeVar(
         "destination_unknown_consumer_type_contra", contravariant=True
     )
@@ -195,8 +181,6 @@ def test_contravariant_typevar_does_not_bind_implicit_unknown() -> None:
 
 
 def test_covariant_user_generic_follows_typevar_metadata() -> None:
-    from typing import Generic
-
     value_type_co = TypeVar("value_type_co", covariant=True)
 
     class Box(Generic[value_type_co]):
@@ -250,8 +234,6 @@ def test_raw_typing_tuple_keeps_implicit_unknown_arguments() -> None:
 
 
 def test_user_generic_inheritance_projects_typevar_bindings() -> None:
-    from typing import Generic
-
     inherited_value_type = TypeVar("inherited_value_type")
 
     class Base(Generic[inherited_value_type]):
@@ -265,8 +247,6 @@ def test_user_generic_inheritance_projects_typevar_bindings() -> None:
 
 
 def test_nested_generic_inheritance_substitutes_typevar_arguments() -> None:
-    from typing import Generic
-
     nested_inherited_value_type = TypeVar("nested_inherited_value_type")
 
     class NestedBase(Generic[nested_inherited_value_type]):
@@ -283,8 +263,6 @@ def test_nested_generic_inheritance_substitutes_typevar_arguments() -> None:
 
 
 def test_custom_builtin_generic_subclasses_project_recoverable_base_arguments() -> None:
-    from typing import Generic
-
     custom_list_value_type = TypeVar("custom_list_value_type")
 
     class CustomList(list[custom_list_value_type], Generic[custom_list_value_type]):
@@ -298,8 +276,6 @@ def test_custom_builtin_generic_subclasses_project_recoverable_base_arguments() 
 
 
 def test_unresolvable_generic_inheritance_is_structured_unknown() -> None:
-    from typing import Generic
-
     value_type = TypeVar("value_type")
 
     class Base(Generic[value_type]):
@@ -315,8 +291,6 @@ def test_unresolvable_generic_inheritance_is_structured_unknown() -> None:
 
 
 def test_missing_generic_inheritance_arguments_are_unknown() -> None:
-    from typing import Generic
-
     value_type = TypeVar("value_type")
 
     class Base(Generic[value_type]):
@@ -410,8 +384,6 @@ def test_source_bounded_typevar_requires_every_permitted_instantiation(
 def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> (
     None
 ):
-    from typing import Generic
-
     constrained_first_type = TypeVar("constrained_first_type")
     constrained_second_type = TypeVar("constrained_second_type")
     repeated_constrained_type = TypeVar("repeated_constrained_type", int, str)
@@ -428,8 +400,6 @@ def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings()
 
 
 def test_repeated_destination_typevar_uses_one_binding() -> None:
-    from typing import Generic
-
     first_type = TypeVar("first_type")
     second_type = TypeVar("second_type")
     shared_type = TypeVar("shared_type")
@@ -445,8 +415,6 @@ def test_repeated_destination_typevar_uses_one_binding() -> None:
 
 
 def test_contravariant_destination_typevar_handles_constraints_and_bounds() -> None:
-    from typing import Generic
-
     class Base:
         pass
 

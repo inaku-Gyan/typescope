@@ -79,7 +79,6 @@ ignore = [
   "D415",  # First line should end with a period, question mark, or exclamation point
   "E501",  # Line too long ({width} > {limit})
   "F405",  # {name} may be undefined, or defined from star imports
-  "PLC0415",  # import should be at the top-level of a file
   "PLR2004",  # Magic value used in comparison, consider replacing {value} with a constant variable
 ]
 
