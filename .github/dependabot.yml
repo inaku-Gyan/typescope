@@ -21,10 +21,11 @@ updates:
     pull-request-branch-name:
       separator: "/"
     groups:
-      python-dependencies:
-        dependency-type: development
+      python-patch:
         update-types:
           - patch
+      python-minor:
+        update-types:
           - minor
 
   - package-ecosystem: github-actions
@@ -46,7 +47,9 @@ updates:
     pull-request-branch-name:
       separator: "/"
     groups:
-      github-actions:
+      github-actions-patch:
         update-types:
           - patch
+      github-actions-minor:
+        update-types:
           - minor

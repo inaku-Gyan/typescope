@@ -1,6 +1,11 @@
 """typescope - Runtime type-level assignability check"""
 
-__version__ = "0.0.2"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("typescope")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 
 from ._assignability_api import evaluate_assignability, is_assignable
 from ._assignability_config import AssignabilityConfigDict

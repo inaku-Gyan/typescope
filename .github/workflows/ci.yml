@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  workflow_call:
+  push:
+    paths:
+      - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "justfile"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "justfile"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality (Ruff + Pyrefly)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Install development environment
+        run: uv sync --locked --dev
+      - name: Run Ruff
+        run: |
+          uv run ruff format --check src tests scripts
+          uv run ruff check src tests scripts
+      - name: Run Pyrefly
+        run: uv run pyrefly check src tests
+
+  test:
+    name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install development environment
+        run: uv sync --locked --dev --python ${{ matrix.python-version }}
+      - name: Run tests with coverage
+        run: uv run --python ${{ matrix.python-version }} pytest --cov=typescope --cov-fail-under=70 --cov-report=term-missing --cov-report=xml:coverage.xml
+      - name: Retain designated coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
+
+  coverage:
+    name: Publish coverage report
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download designated coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  dist:
+    name: Build and verify distributions
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.13
+      - name: Install development environment
+        run: uv sync --locked --dev
+      - name: Set up just
+        uses: extractions/setup-just@v2
+      - name: Build distributions
+        run: just build
+      - name: Verify distributions
+        run: just verify-dist
+      - name: Retain distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error

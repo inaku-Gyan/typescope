@@ -16,8 +16,7 @@ Repository = "https://github.com/inaku-Gyan/typescope"
 
 [dependency-groups]
 dev = [
-  "pre-commit>=4.3.0",
-  "pyright>=1.1.404",
+  "pyrefly>=1.3.2",
   "pytest>=8.4.1",
   "pytest-cov>=6.2.1",
   "ruff>=0.12.10",
@@ -30,10 +29,19 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = "tests"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/typescope"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/typescope",
+  "README.md",
+  "LICENSE",
+]
+
 [tool.ruff]
-# 先只针对 Python 3.13
-target-version = "py313"
-# 自动修复
+# Keep lint and formatting compatible with every supported runtime.
+target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
