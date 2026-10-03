@@ -1,7 +1,7 @@
 """Public result and profile types for assignability evaluation."""
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Final, Literal
 
 __all__ = [
@@ -18,7 +18,7 @@ NATIVE_PROFILE: Final = "typescope-native/1"
 UnknownPolicy = Literal["return_none", "return_true", "return_false", "raise"]
 
 
-class AssignabilityStatus(str, Enum):
+class AssignabilityStatus(StrEnum):
     """The three possible outcomes of a structured evaluation."""
 
     ASSIGNABLE = "assignable"
@@ -26,7 +26,7 @@ class AssignabilityStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RuleSource(str, Enum):
+class RuleSource(StrEnum):
     """The provenance of the rule that produced an evaluation result."""
 
     STANDARD = "standard"

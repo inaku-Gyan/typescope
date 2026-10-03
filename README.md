@@ -19,7 +19,7 @@ points are:
 - `just testcov` writes the machine-readable `coverage.xml` report.
 - `just build` creates the wheel and source distribution in `dist/`.
 - `just verify-dist` installs both artifacts into isolated environments and runs an API smoke test.
-- `just release-check v0.0.2` validates a version tag against the built metadata.
+- `just release-check v0.0.3` validates a version tag against the built metadata.
 
 Releases are made from protected `v<version>` tags. GitHub Actions validates both artifacts before
 publishing through PyPI Trusted Publishing (OIDC); ordinary branches and manual validation runs do

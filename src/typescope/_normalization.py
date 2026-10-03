@@ -5,7 +5,7 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 __all__ = [
@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 
-class NormalizedKind(str, Enum):
+class NormalizedKind(StrEnum):
     """Semantic categories understood by the native evaluation spine."""
 
     CLASS = "class"
@@ -25,7 +25,7 @@ class NormalizedKind(str, Enum):
     UNION = "union"
 
 
-class SpecialType(str, Enum):
+class SpecialType(StrEnum):
     """Special type forms handled before nominal class rules."""
 
     ANY = "any"
