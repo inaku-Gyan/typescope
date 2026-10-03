@@ -233,9 +233,7 @@ _KNOWN_GENERIC_VARIANCES: dict[type[Any], tuple[str, ...]] = {
 def _is_generic_origin(origin: object) -> bool:
     if not isinstance(origin, type):
         return False
-    return origin in _KNOWN_GENERIC_VARIANCES or bool(
-        _generic_parameters(origin)
-    )
+    return origin in _KNOWN_GENERIC_VARIANCES or bool(_generic_parameters(origin))
 
 
 def _has_generic_base(origin: type[Any]) -> bool:

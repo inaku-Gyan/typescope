@@ -575,7 +575,9 @@ def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
                     source_arg, typevar, context, argument_path
                 )
             else:
-                decision = _evaluate(destination_arg, source_arg, context, argument_path)
+                decision = _evaluate(
+                    destination_arg, source_arg, context, argument_path
+                )
         else:
             forward = _evaluate(source_arg, destination_arg, context, argument_path)
             reverse = (

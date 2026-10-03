@@ -69,9 +69,7 @@ def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
     class GenericConsumer(Generic[destination_consumer_type_contra]):
         pass
 
-    assert ia(
-        GenericConsumer[int], GenericConsumer[destination_consumer_type_contra]
-    )
+    assert ia(GenericConsumer[int], GenericConsumer[destination_consumer_type_contra])
 
 
 def test_contravariant_typevar_does_not_bind_implicit_unknown() -> None:
@@ -220,7 +218,9 @@ def test_source_typevar_constraints_require_every_permitted_instantiation() -> N
     assert ia(source_constrained_type, object)
 
 
-def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> None:
+def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings() -> (
+    None
+):
     from typing import Generic
 
     constrained_first_type = TypeVar("constrained_first_type")
@@ -230,7 +230,9 @@ def test_repeated_constrained_destination_typevar_rejects_conflicting_bindings()
     class Pair(Generic[constrained_first_type, constrained_second_type]):
         pass
 
-    assert ia(Pair[int, int], Pair[repeated_constrained_type, repeated_constrained_type])
+    assert ia(
+        Pair[int, int], Pair[repeated_constrained_type, repeated_constrained_type]
+    )
     assert not ia(
         Pair[int, str], Pair[repeated_constrained_type, repeated_constrained_type]
     )
