@@ -16,7 +16,7 @@ def test_basic_builtin_types() -> None:
 
     assert ia(float, float)
     assert not ia(float, int)
-    assert not ia(int, float)
+    assert ia(int, float)
 
     #### Special case for `bool` and `int` ####
     assert ia(bool, bool)
@@ -57,14 +57,14 @@ def test_basic_builtin_types_with_typing_union() -> None:
     assert ia(int, Union[int, int, int])
 
     assert ia(int, Union[int, str])
-    assert not ia(int, Union[str, float])
+    assert ia(int, Union[str, float])
 
     assert ia(str, Union[int, str])
     assert not ia(str, Union[int, float])
 
     assert ia(float, Union[int, float])
     assert not ia(float, Union[int, str])
-    assert not ia(int, Union[float, str])
+    assert ia(int, Union[float, str])
 
     assert ia(bool, Union[bool, int])
     assert not ia(int, Union[bool, str])
@@ -107,12 +107,12 @@ def test_basic_builtin_types_with_pep604_union() -> None:
     assert ia(int, int | int | int)
 
     assert ia(int, int | str)
-    assert not ia(int, str | float)
+    assert ia(int, str | float)
     assert ia(str, int | str)
     assert not ia(str, int | float)
     assert ia(float, int | float)
     assert not ia(float, int | str)
-    assert not ia(int, float | str)
+    assert ia(int, float | str)
     assert ia(bool, bool | int)
     assert not ia(int, bool | str)
     assert not ia(bool, int | str)

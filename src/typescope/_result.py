@@ -44,6 +44,8 @@ class AssignabilityResult:
     rule_path: tuple[str, ...] = ()
     reason_code: str | None = None
     detail: str | None = None
+    provenance: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
 
     @property
     def is_definite(self) -> bool:

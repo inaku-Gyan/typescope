@@ -2,8 +2,8 @@
 
 from typing import Any, Literal, overload
 
-from ._assignability import _evaluate_legacy
 from ._assignability_config import AssignabilityConfigDict
+from ._engine import evaluate_native
 from ._result import (
     NATIVE_PROFILE,
     AssignabilityCapabilityError,
@@ -35,28 +35,14 @@ def evaluate_assignability(
         return AssignabilityResult(
             AssignabilityStatus.UNKNOWN,
             profile=profile,
-            reason_code="profile_unsupported",
+            rule_source=RuleSource.EXTENSION,
+            rule_path=("profile",),
+            reason_code="profile.unsupported",
             detail=f"unsupported semantic profile: {profile!r}",
+            evidence=("profile.unsupported",),
         )
 
-    try:
-        value = _evaluate_legacy(source, destination)
-    except (AttributeError, TypeError, ValueError) as exc:
-        return AssignabilityResult(
-            AssignabilityStatus.UNKNOWN,
-            profile=profile,
-            reason_code="expression_unsupported",
-            detail=str(exc) or type(exc).__name__,
-        )
-
-    return AssignabilityResult(
-        AssignabilityStatus.ASSIGNABLE
-        if value
-        else AssignabilityStatus.NOT_ASSIGNABLE,
-        profile=profile,
-        rule_source=RuleSource.STANDARD,
-        rule_path=("legacy-core",),
-    )
+    return evaluate_native(source, destination, profile=profile)
 
 
 def _evaluate_with_config(
@@ -71,25 +57,20 @@ def _evaluate_with_config(
         return AssignabilityResult(
             AssignabilityStatus.UNKNOWN,
             profile=profile,
-            reason_code="profile_unsupported",
+            rule_source=RuleSource.EXTENSION,
+            rule_path=("profile",),
+            reason_code="profile.unsupported",
             detail=f"unsupported semantic profile: {profile!r}",
+            evidence=("profile.unsupported",),
         )
-    try:
-        value = _evaluate_legacy(source, destination, config)
-    except (AttributeError, TypeError, ValueError) as exc:
-        return AssignabilityResult(
-            AssignabilityStatus.UNKNOWN,
-            profile=profile,
-            reason_code="expression_unsupported",
-            detail=str(exc) or type(exc).__name__,
-        )
-    return AssignabilityResult(
-        AssignabilityStatus.ASSIGNABLE
-        if value
-        else AssignabilityStatus.NOT_ASSIGNABLE,
-        profile=profile,
-        rule_source=RuleSource.STANDARD,
-        rule_path=("legacy-core",),
+    evaluation_profile = profile
+    if config and config.get("allow_bool_to_int"):
+        evaluation_profile = f"{profile}+compat.allow_bool_to_int"
+    return evaluate_native(
+        source,
+        destination,
+        profile=evaluation_profile,
+        config=config,
     )
 
 
@@ -135,8 +116,7 @@ def is_assignable(
 
     if on_unknown not in _UNKNOWN_POLICIES:
         raise ValueError(
-            "on_unknown must be one of: "
-            + ", ".join(sorted(_UNKNOWN_POLICIES))
+            "on_unknown must be one of: " + ", ".join(sorted(_UNKNOWN_POLICIES))
         )
 
     result = _evaluate_with_config(source, destination, profile, config)
