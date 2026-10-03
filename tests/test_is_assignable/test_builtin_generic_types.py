@@ -72,6 +72,17 @@ def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
     assert ia(GenericConsumer[int], GenericConsumer[destination_consumer_type_contra])
 
 
+def test_explicit_any_can_bind_contravariant_destination_typevar() -> None:
+    from typing import Any, Generic
+
+    any_consumer_type_contra = TypeVar("any_consumer_type_contra", contravariant=True)
+
+    class GenericConsumer(Generic[any_consumer_type_contra]):
+        pass
+
+    assert ia(GenericConsumer[Any], GenericConsumer[any_consumer_type_contra])
+
+
 def test_contravariant_typevar_does_not_bind_implicit_unknown() -> None:
     from typing import Generic
 
