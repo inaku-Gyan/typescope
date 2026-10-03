@@ -17,6 +17,19 @@ def test_basic_builtin_generic_types() -> None:
 
 
 @pytest.mark.parametrize(
+    "expression",
+    [list[int, str], dict[int], type[int, str]],
+)
+def test_malformed_fixed_arity_generics_are_capability_unknown(
+    expression: object,
+) -> None:
+    result = evaluate_assignability(expression, expression)
+
+    assert result.status == "unknown"
+    assert result.reason_code == "normalization.generic_arity"
+
+
+@pytest.mark.parametrize(
     ("source", "destination"),
     [
         (typing.List[int], list[int]),
@@ -364,3 +377,13 @@ def test_implicit_unknown_stays_opaque_through_unions() -> None:
     assert result.reason_code == "assignability.unknown_type"
     assert reverse.status == "not_assignable"
     assert reverse.reason_code == "assignability.unknown_type"
+
+
+def test_checker_unknown_does_not_bypass_outer_generic_or_union_rules() -> None:
+    profile = "typescope-checker/unknown-as-any/1"
+
+    generic_result = evaluate_assignability(list, dict[int, int], profile=profile)
+    union_result = evaluate_assignability(list | str, int, profile=profile)
+
+    assert generic_result.status == "not_assignable"
+    assert union_result.status == "not_assignable"
