@@ -556,6 +556,11 @@ def project_generic_arguments(  # noqa: PLR0911, PLR0912 - explicit failure path
                 ):
                     return None
                 return resolved
+            projected_base = _project_builtin_arguments(
+                base_origin, resolved, destination_origin
+            )
+            if projected_base is not None:
+                return projected_base
             if base_parameters or getattr(base_origin, "__orig_bases__", ()):
                 queue.append((base_origin, next_mapping))
     return None
