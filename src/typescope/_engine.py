@@ -625,6 +625,9 @@ def _typevar_accepts_reverse(  # noqa: PLR0911, PLR0912 - explicit constraint br
             typevar,
         )
         return _evaluate(typevar_expression, source, context, path)
+    if _is_special(source, SpecialType.ANY):
+        context.typevar_bindings[typevar] = source
+        return _assignable(path + ("typevar.bind",))
 
     existing = context.typevar_bindings.get(typevar)
     if existing is not None:
