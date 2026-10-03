@@ -203,6 +203,21 @@ def test_nested_generic_inheritance_substitutes_typevar_arguments() -> None:
     assert not ia(NestedChild[int], NestedBase[list[str]])
 
 
+def test_custom_builtin_generic_subclasses_project_recoverable_base_arguments() -> None:
+    from typing import Generic
+
+    custom_list_value_type = TypeVar("custom_list_value_type")
+
+    class CustomList(list[custom_list_value_type], Generic[custom_list_value_type]):
+        pass
+
+    class CustomDict(dict[str, int]):
+        pass
+
+    assert ia(CustomList[int], Sequence[object])
+    assert ia(CustomDict, Mapping[str, object])
+
+
 def test_unresolvable_generic_inheritance_is_structured_unknown() -> None:
     from typing import Generic
 
