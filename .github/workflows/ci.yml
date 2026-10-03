@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -53,7 +53,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -66,7 +66,7 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} pytest --cov=typescope --cov-fail-under=70 --cov-report=term-missing --cov-report=xml:coverage.xml
       - name: Retain designated coverage report
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.xml
@@ -78,11 +78,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download designated coverage report
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: coverage-report
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         continue-on-error: true
         with:
           files: coverage.xml
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -104,13 +104,13 @@ jobs:
       - name: Install development environment
         run: uv sync --locked --dev
       - name: Set up just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Build distributions
         run: just build
       - name: Verify distributions
         run: just verify-dist
       - name: Retain distributions
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: distributions
           path: dist/
