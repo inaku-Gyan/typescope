@@ -59,6 +59,21 @@ def test_contravariant_user_generic_reverses_argument_direction() -> None:
     assert not ia(GenericConsumer[int], GenericConsumer[object])
 
 
+def test_contravariant_destination_typevar_can_bind_argument_evidence() -> None:
+    from typing import Generic
+
+    destination_consumer_type_contra = TypeVar(
+        "destination_consumer_type_contra", contravariant=True
+    )
+
+    class GenericConsumer(Generic[destination_consumer_type_contra]):
+        pass
+
+    assert ia(
+        GenericConsumer[int], GenericConsumer[destination_consumer_type_contra]
+    )
+
+
 def test_covariant_user_generic_follows_typevar_metadata() -> None:
     from typing import Generic
 
