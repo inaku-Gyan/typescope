@@ -484,11 +484,19 @@ def _typevar_produces(  # noqa: PLR0911 - ordered TypeVar evidence rules
         return _assignable(path + ("typevar.constraints",))
 
     if typevar.__bound__ is not None:
-        return _evaluate(
+        decision = _evaluate(
             _normalize_typevar_target(typevar.__bound__, context),
             destination,
             context,
             path + ("typevar.bound",),
+        )
+        if decision.status is not AssignabilityStatus.NOT_ASSIGNABLE:
+            return decision
+        return _unknown(
+            context,
+            path + ("typevar.binding",),
+            "typevar.binding_unknown",
+            "not every bounded TypeVar instantiation satisfies the destination",
         )
 
     no_default = getattr(typing, "NoDefault", object())
