@@ -40,6 +40,18 @@ _Avoid_: `inspect.Signature` identity, callable runtime value
 An explicit unknown parameter set represented by `Callable[..., R]`. It is distinct from `Any` and from a concrete parameter list; relations that cannot be safely proved from the unknown parameter set produce capability unknown.
 _Avoid_: `Callable[[Any], R]`, arbitrary signature
 
+**Evaluation context**:
+The bounded state for one assignability evaluation: semantic profile, normalized comparison pairs, recursion or expansion budget, rule path, and capability evidence. It is not ambient global state and is not part of a type's semantic identity.
+_Avoid_: global evaluator state, cache key alone
+
+**Rule path**:
+The normalized semantic location of a comparison step, such as a Union member, generic argument, Protocol member, or Callable parameter. It explains a result without depending on runtime carrier names or repr output.
+_Avoid_: traceback, diagnostic message
+
+**Semantic oracle**:
+The authoritative expected behavior for a test case, separated into typing-standard rules, an explicit checker profile, or a Wayfinder extension. A checker comparison is evidence about a convention, not a native oracle.
+_Avoid_: implementation snapshot, differential result
+
 **Representation provenance**:
 Metadata retained from the original spelling or carrier, such as `typing.Union` versus PEP 604 syntax, so diagnostics can explain equivalent forms without using them as distinct native semantics.
 _Avoid_: checker result
