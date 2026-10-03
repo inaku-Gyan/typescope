@@ -25,12 +25,28 @@ The concrete runtime object and `type(...)` result used to carry a type expressi
 _Avoid_: semantic type, canonical type
 
 **Normalized type form**:
-The version-independent semantic representation used by TypeScope to compare a type expression after inspecting public origin, arguments, special markers, and provenance.
+The version-independent semantic representation used by TypeScope to compare a type expression after inspecting public origin, arguments, special markers, and provenance. It has an explicit semantic kind such as class, special type, union, generic, type variable, callable, or protocol; a Python runtime carrier class is never its identity.
 _Avoid_: runtime class, normalized `type`
 
 **Representation provenance**:
 Metadata retained from the original spelling or carrier, such as `typing.Union` versus PEP 604 syntax, so diagnostics can explain equivalent forms without using them as distinct native semantics.
 _Avoid_: checker result
+
+**Semantic identity**:
+The normalized kind and semantic fields that determine native assignability. Equivalent standard and backported spellings share semantic identity even when their runtime carriers, `type(...)` results, or checker displays differ.
+_Avoid_: representation identity, display name
+
+**Normalization**:
+The boundary operation that maps a type expression into a normalized type form and representation provenance using public introspection and feature detection.
+_Avoid_: casting, runtime value inspection
+
+**Alias provenance**:
+The retained chain of type-alias declarations and source carriers encountered while normalizing an alias. Alias provenance explains diagnostics while the alias target supplies native semantic identity.
+_Avoid_: alias identity as assignability
+
+**Unknown normalization**:
+The result of normalization when a type expression cannot be resolved safely, such as an unresolved forward reference, unsupported carrier, alias cycle, or exhausted expansion budget. It carries a stable reason code and does not become `Any` or `not_assignable` implicitly.
+_Avoid_: fallback type
 
 ## Semantic sources
 
