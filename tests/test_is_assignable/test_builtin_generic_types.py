@@ -158,6 +158,18 @@ def test_empty_tuple_is_a_fixed_shape_with_no_element_requirements() -> None:
     assert not ia(tuple[()], tuple[int])
 
 
+def test_raw_typing_tuple_keeps_implicit_unknown_arguments() -> None:
+    result = evaluate_assignability(typing.Tuple, typing.Tuple[int, ...])
+
+    assert result.status == "not_assignable"
+    assert result.reason_code == "assignability.unknown_type"
+    assert ia(
+        typing.Tuple,
+        typing.Tuple[int, ...],
+        profile="typescope-checker/unknown-as-any/1",
+    )
+
+
 def test_user_generic_inheritance_projects_typevar_bindings() -> None:
     from typing import Generic
 
