@@ -565,7 +565,17 @@ def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
         if variance == "covariant":
             decision = _evaluate(source_arg, destination_arg, context, argument_path)
         elif variance == "contravariant":
-            decision = _evaluate(destination_arg, source_arg, context, argument_path)
+            if (
+                destination_arg.kind is NormalizedKind.TYPEVAR
+                and source_arg.kind is not NormalizedKind.TYPEVAR
+            ):
+                typevar = destination_arg.value
+                assert isinstance(typevar, typing.TypeVar)
+                decision = _typevar_accepts_reverse(
+                    source_arg, typevar, context, argument_path
+                )
+            else:
+                decision = _evaluate(destination_arg, source_arg, context, argument_path)
         else:
             forward = _evaluate(source_arg, destination_arg, context, argument_path)
             reverse = (
@@ -597,6 +607,79 @@ def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
         if decision.rule_source is RuleSource.CHECKER:
             rule_source = RuleSource.CHECKER
     return unknown or _assignable(path + ("generic",), rule_source=rule_source)
+
+
+def _typevar_accepts_reverse(  # noqa: PLR0911, PLR0912 - explicit constraint branches
+    source: NormalizedType,
+    typevar: typing.TypeVar,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    """Bind a destination TypeVar discovered through a contravariant edge."""
+
+    existing = context.typevar_bindings.get(typevar)
+    if existing is not None:
+        return _evaluate(existing, source, context, path + ("typevar.binding",))
+
+    constraints = typevar.__constraints__
+    if constraints:
+        candidates: list[NormalizedType] = []
+        unknown: _Decision | None = None
+        for index, constraint in enumerate(constraints):
+            candidate = _normalize_typevar_target(constraint, context)
+            bindings_before = dict(context.typevar_bindings)
+            decision = _evaluate(
+                candidate,
+                source,
+                context,
+                path + (f"typevar.constraint[{index}]",),
+            )
+            context.typevar_bindings.clear()
+            context.typevar_bindings.update(bindings_before)
+            if decision.status is AssignabilityStatus.ASSIGNABLE:
+                candidates.append(candidate)
+            elif decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = decision
+        if not candidates:
+            return unknown or _not_assignable(path + ("typevar.constraints",))
+        if len(candidates) > 1:
+            exact = [candidate for candidate in candidates if candidate == source]
+            if len(exact) != 1:
+                return _unknown(
+                    context,
+                    path + ("typevar.binding",),
+                    "typevar.binding_unknown",
+                    "multiple TypeVar constraints accept the contravariant evidence",
+                )
+            selected = exact[0]
+        else:
+            selected = candidates[0]
+        context.typevar_bindings[typevar] = selected
+        return _assignable(path + ("typevar.bind",))
+
+    if typevar.__bound__ is not None:
+        bound = _normalize_typevar_target(typevar.__bound__, context)
+        source_to_bound = _evaluate(source, bound, context, path + ("typevar.bound",))
+        if source_to_bound.status is AssignabilityStatus.ASSIGNABLE:
+            context.typevar_bindings[typevar] = source
+            return _assignable(path + ("typevar.bind",))
+        bound_to_source = _evaluate(bound, source, context, path + ("typevar.bound",))
+        if bound_to_source.status is AssignabilityStatus.ASSIGNABLE:
+            context.typevar_bindings[typevar] = bound
+            return _assignable(path + ("typevar.bind",))
+        if (
+            source_to_bound.status is AssignabilityStatus.UNKNOWN
+            or bound_to_source.status is AssignabilityStatus.UNKNOWN
+        ):
+            return (
+                source_to_bound
+                if source_to_bound.status is AssignabilityStatus.UNKNOWN
+                else bound_to_source
+            )
+        return _not_assignable(path + ("typevar.bound",))
+
+    context.typevar_bindings[typevar] = source
+    return _assignable(path + ("typevar.bind",))
 
 
 def _expand_generic_shape(
