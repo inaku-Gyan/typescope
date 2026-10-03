@@ -264,6 +264,9 @@ def _evaluate_generics(
     if source_is_generic:
         return _evaluate_generic_to_class(source, destination, context, path)
 
+    if source.kind is not NormalizedKind.CLASS:
+        return None
+
     # A bare class carries no evidence for the destination's type arguments.
     # Keep nominal subclassing useful, but never invent an argument binding.
     return _evaluate_class_to_generic(source, destination, context, path)
