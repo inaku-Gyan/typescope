@@ -52,6 +52,18 @@ _Avoid_: traceback, diagnostic message
 The authoritative expected behavior for a test case, separated into typing-standard rules, an explicit checker profile, or a Wayfinder extension. A checker comparison is evidence about a convention, not a native oracle.
 _Avoid_: implementation snapshot, differential result
 
+**Release acceptance baseline**:
+The minimum package and automation capabilities that a reconstruction must preserve: supported Python/runtime matrix, distributable artifacts, verification gates, and an authenticated publication path.
+_Avoid_: legacy workflow, deployment snapshot
+
+**Testcov capability**:
+The repository capability that runs the test suite with a coverage threshold and produces a machine-readable report for CI publication. It is a quality gate and report channel, not a semantic oracle.
+_Avoid_: coverage percentage as correctness proof
+
+**Dependency update channel**:
+The automated path for dependency and GitHub Actions updates, including its ecosystem, grouping, labels, branch names, and review gates. It is separate from release version tags and package publication.
+_Avoid_: release tag, package version
+
 **Representation provenance**:
 Metadata retained from the original spelling or carrier, such as `typing.Union` versus PEP 604 syntax, so diagnostics can explain equivalent forms without using them as distinct native semantics.
 _Avoid_: checker result

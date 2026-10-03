@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - dependencies:python
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+      include: scope
+    pull-request-branch-name:
+      separator: "/"
+    groups:
+      python-dependencies:
+        dependency-type: development
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - dependencies:github-actions
+    commit-message:
+      prefix: deps
+      include: scope
+    pull-request-branch-name:
+      separator: "/"
+    groups:
+      github-actions:
+        update-types:
+          - patch
+          - minor
