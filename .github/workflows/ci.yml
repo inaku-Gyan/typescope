@@ -104,7 +104,7 @@ jobs:
       - name: Install development environment
         run: uv sync --locked --dev
       - name: Set up just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Build distributions
         run: just build
       - name: Verify distributions
