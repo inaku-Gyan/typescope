@@ -365,6 +365,7 @@ def _projection_kind(
         list: (
             collections_abc.MutableSequence,
             collections_abc.Sequence,
+            collections_abc.Reversible,
             collections_abc.Collection,
             collections_abc.Container,
             collections_abc.Iterable,
@@ -429,6 +430,7 @@ def _projection_kind(
         dict: (
             collections_abc.Collection,
             collections_abc.Container,
+            collections_abc.Reversible,
             collections_abc.Iterable,
         ),
         collections_abc.MutableMapping: (

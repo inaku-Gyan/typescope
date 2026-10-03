@@ -565,10 +565,13 @@ def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
         if variance == "covariant":
             decision = _evaluate(source_arg, destination_arg, context, argument_path)
         elif variance == "contravariant":
-            if (
-                destination_arg.kind is NormalizedKind.TYPEVAR
-                and source_arg.kind is not NormalizedKind.TYPEVAR
-            ):
+            if source_arg.kind is NormalizedKind.TYPEVAR:
+                typevar = source_arg.value
+                assert isinstance(typevar, typing.TypeVar)
+                decision = _evaluate_source_typevar_contravariant(
+                    typevar, destination_arg, context, argument_path
+                )
+            elif destination_arg.kind is NormalizedKind.TYPEVAR:
                 typevar = destination_arg.value
                 assert isinstance(typevar, typing.TypeVar)
                 decision = _typevar_accepts_reverse(
@@ -609,6 +612,68 @@ def _compare_generic_arguments(  # noqa: PLR0911, PLR0912 - variance branches
         if decision.rule_source is RuleSource.CHECKER:
             rule_source = RuleSource.CHECKER
     return unknown or _assignable(path + ("generic",), rule_source=rule_source)
+
+
+def _evaluate_source_typevar_contravariant(  # noqa: PLR0911 - ordered TypeVar rules
+    typevar: typing.TypeVar,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    """Keep a source TypeVar unbound when a contravariant edge is reversed."""
+
+    if _is_special(destination, SpecialType.ANY):
+        return _assignable(path + ("special.any",))
+    if _is_special(destination, SpecialType.NEVER):
+        return _assignable(path + ("special.never.source",))
+    if _is_special(destination, SpecialType.UNKNOWN):
+        return (
+            _assignable(
+                path + ("special.unknown_as_any",),
+                rule_source=RuleSource.CHECKER,
+            )
+            if context.unknown_as_any
+            else _not_assignable(
+                path + ("special.unknown",),
+                reason_code="assignability.unknown_type",
+                rule_source=RuleSource.EXTENSION,
+            )
+        )
+
+    constraints = typevar.__constraints__
+    if constraints:
+        unknown = False
+        for constraint in constraints:
+            candidate = _normalize_typevar_target(constraint, context)
+            decision = _evaluate(destination, candidate, context, path)
+            if decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = True
+            elif decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+                unknown = True
+        if unknown:
+            return _unknown(
+                context,
+                path + ("typevar.binding",),
+                "typevar.binding_unknown",
+                "a source TypeVar is not proven for every contravariant instantiation",
+            )
+        return _assignable(path + ("typevar.constraints",))
+
+    no_default = getattr(typing, "NoDefault", object())
+    default = getattr(typevar, "__default__", no_default)
+    if default is not no_default:
+        return _evaluate(
+            destination,
+            _normalize_typevar_target(default, context),
+            context,
+            path + ("typevar.default",),
+        )
+    return _unknown(
+        context,
+        path + ("typevar.binding",),
+        "typevar.binding_unknown",
+        "a source TypeVar cannot be bound from contravariant destination evidence",
+    )
 
 
 def _typevar_accepts_reverse(  # noqa: PLR0911, PLR0912 - explicit constraint branches
