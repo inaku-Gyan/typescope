@@ -463,6 +463,11 @@ def _normalize_typed_dict(  # noqa: PLR0912, PLR0915 - ordered metadata boundary
                 read_only = False
         else:
             read_only = bool(read_only_marker)
+            if read_only_marker is not None:
+                # A ReadOnly qualifier without the public key-set metadata
+                # cannot prove that this runtime exposes its mutability
+                # semantics (notably on older backport combinations).
+                completeness = ShapeCompleteness.UNKNOWN
         if read_only_marker is not None and read_only_marker != read_only:
             completeness = ShapeCompleteness.UNKNOWN
         specs.append(
@@ -501,13 +506,14 @@ def _normalize_typed_dict_openness(
 
     closed = getattr(expression, "__closed__", _MISSING)
     extra = getattr(expression, "__extra_items__", _MISSING)
+    no_extra_items = _no_extra_items_sentinel()
     if closed is _MISSING and extra is _MISSING:
         # Legacy TypedDict declarations are open by specification.  The
         # absence of newer closed/extra metadata is therefore known evidence.
         return ShapeOpenness.OPEN, None, True
-    if closed is not _MISSING and not isinstance(closed, bool):
+    if closed is not _MISSING and closed is not None and not isinstance(closed, bool):
         return ShapeOpenness.UNKNOWN, None, False
-    if extra is _MISSING or extra is None:
+    if extra is _MISSING or extra is None or extra is no_extra_items:
         return (
             ShapeOpenness.CLOSED if closed is True else ShapeOpenness.OPEN,
             None,
@@ -529,6 +535,16 @@ def _normalize_typed_dict_openness(
         provenance=RepresentationProvenance(_carrier_name(extra)),
     )
     return ShapeOpenness.EXTRA_ITEMS, spec, True
+
+
+def _no_extra_items_sentinel() -> object:
+    """Return the optional typing sentinel used by PEP 728 backports."""
+
+    for module in (typing, _typing_extensions):
+        sentinel = getattr(module, "NoExtraItems", _MISSING)
+        if sentinel is not _MISSING:
+            return sentinel
+    return _MISSING
 
 
 # The standard library does not expose variance metadata for built-in generic
