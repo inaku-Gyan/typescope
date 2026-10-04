@@ -772,7 +772,7 @@ def _normalize_member_annotation(  # noqa: PLR0911 - ordered annotation boundary
         return _unknown_normalized_type(annotation), False
     if isinstance(annotation, type) and _is_protocol(annotation):
         normalized = _normalize(annotation, state=state)
-        return normalized, normalized.kind is not NormalizedKind.PROTOCOL_REFERENCE
+        return normalized, True
     try:
         return _normalize(annotation, state=state), True
     except (NormalizationError, AttributeError, TypeError, ValueError):
