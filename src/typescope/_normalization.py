@@ -5,8 +5,10 @@ from __future__ import annotations
 import types
 import typing
 from collections import abc as collections_abc
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 __all__ = [
@@ -14,6 +16,13 @@ __all__ = [
     "NormalizationBudget",
     "NormalizedKind",
     "NormalizedType",
+    "RepresentationProvenance",
+    "ShapeCompleteness",
+    "ShapeOpenness",
+    "Completeness",
+    "Openness",
+    "KeySpec",
+    "KeyShape",
     "generic_variances",
     "normalize_type_expression",
     "project_generic_arguments",
@@ -28,6 +37,7 @@ class NormalizedKind(StrEnum):
     SPECIAL = "special"
     TYPEVAR = "typevar"
     UNION = "union"
+    TYPED_DICT = "typeddict"
 
 
 class SpecialType(StrEnum):
@@ -38,6 +48,29 @@ class SpecialType(StrEnum):
     NONE = "none"
     UNKNOWN = "unknown"
     ELLIPSIS = "ellipsis"
+
+
+class ShapeCompleteness(StrEnum):
+    """Evidence state for a structural shape.
+
+    ``partial`` is reserved for a shape that is known to be incomplete (for
+    example, metadata omitted by a provider).  ``unknown`` means that one or
+    more fields could not be resolved safely.  Neither state permits a
+    structural assignability decision in the native profile.
+    """
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNKNOWN = "unknown"
+
+
+class ShapeOpenness(StrEnum):
+    """Supported openness evidence for a mapping schema."""
+
+    OPEN = "open"
+    CLOSED = "closed"
+    EXTRA_ITEMS = "extra_items"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +97,53 @@ class NormalizedType:
     provenance: RepresentationProvenance = field(
         default=RepresentationProvenance("unknown"), compare=False, hash=False
     )
+    shape: KeyShape | None = field(default=None, compare=False, hash=False)
+
+
+@dataclass(frozen=True, slots=True)
+class KeySpec:
+    """Immutable evidence describing one TypedDict key."""
+
+    value_type: NormalizedType
+    required: bool
+    read_only: bool
+    provenance: RepresentationProvenance | None = field(
+        default=None, compare=False, hash=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class KeyShape:
+    """Immutable mapping-schema evidence extracted from a TypedDict."""
+
+    keys: tuple[tuple[str, KeySpec], ...]
+    openness: ShapeOpenness
+    extra_items: KeySpec | None = None
+    completeness: ShapeCompleteness = ShapeCompleteness.COMPLETE
+    provenance: RepresentationProvenance = field(
+        default=RepresentationProvenance("unknown"), compare=False, hash=False
+    )
+
+    def __post_init__(self) -> None:
+        # A tuple is the public immutable representation.  Reject duplicate
+        # names early so malformed provider evidence cannot be ambiguous.
+        names = tuple(name for name, _ in self.keys)
+        if len(names) != len(set(names)):
+            raise ValueError("TypedDict KeyShape contains duplicate keys")
+        if any(not isinstance(name, str) for name in names):
+            raise TypeError("TypedDict KeyShape key names must be strings")
+
+    def as_mapping(self) -> Mapping[str, KeySpec]:
+        """Return a read-only mapping view for callers that need lookup."""
+
+        return MappingProxyType(dict(self.keys))
+
+
+# Short aliases keep the vocabulary convenient for callers while the prefixed
+# names make it clear these enums describe shape evidence rather than result
+# status.  Both spellings are exported as part of the normalization boundary.
+Completeness = ShapeCompleteness
+Openness = ShapeOpenness
 
 
 class NormalizationError(TypeError):
@@ -125,6 +205,19 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
             NormalizedKind.SPECIAL,
             SpecialType.NONE,
             provenance=provenance,
+        )
+
+    if _is_typed_dict(expression):
+        shape = _normalize_typed_dict(expression, state=state, provenance=provenance)
+        # The shape is the semantic identity.  Keeping it in ``value`` means
+        # equivalent stdlib and backport declarations compare equal even though
+        # their runtime classes (and carriers) differ.  ``shape`` is also
+        # exposed explicitly for structural evaluators that need its fields.
+        return NormalizedType(
+            NormalizedKind.TYPED_DICT,
+            shape,
+            provenance=provenance,
+            shape=shape,
         )
 
     if isinstance(expression, typing.TypeVar):
@@ -200,6 +293,242 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
 def _carrier_name(expression: Any) -> str:
     carrier = type(expression)
     return f"{carrier.__module__}.{carrier.__qualname__}"
+
+
+_MISSING = object()
+try:  # ``typing_extensions`` is optional and must not be a runtime dependency.
+    import typing_extensions as _typing_extensions
+except ImportError:  # pragma: no cover - exercised on minimal installations.
+    _typing_extensions = None
+
+
+def _is_typed_dict(expression: Any) -> bool:
+    """Detect stdlib and available backport TypedDict declarations."""
+
+    for module in (typing, _typing_extensions):
+        detector = getattr(module, "is_typeddict", None)
+        if detector is None:
+            continue
+        try:
+            if detector(expression):
+                return True
+        except (AttributeError, TypeError):
+            continue
+    return False
+
+
+def _metadata_name_set(expression: Any, name: str) -> tuple[set[str] | None, bool]:
+    """Read a public key-set attribute, returning ``(value, valid)``."""
+
+    raw = getattr(expression, name, _MISSING)
+    if raw is _MISSING:
+        return None, True
+    if isinstance(raw, (set, frozenset, tuple, list)) and all(
+        isinstance(item, str) for item in raw
+    ):
+        return set(raw), True
+    return set(), False
+
+
+def _qualifier_matches(origin: object, name: str) -> bool:
+    """Match stdlib and optional-backport typing qualifiers by identity."""
+
+    candidates = [getattr(typing, name, None)]
+    if _typing_extensions is not None:
+        candidates.append(getattr(_typing_extensions, name, None))
+    return any(
+        candidate is not None and origin is candidate for candidate in candidates
+    )
+
+
+def _unwrap_typed_dict_annotation(
+    annotation: Any,
+) -> tuple[Any, bool | None, bool | None, bool]:
+    """Strip Required/NotRequired/ReadOnly wrappers from one key annotation."""
+
+    required: bool | None = None
+    read_only: bool | None = None
+    invalid = False
+    current = annotation
+    while True:
+        origin = typing.get_origin(current)
+        if origin is None:
+            break
+        if _qualifier_matches(origin, "Required"):
+            marker = True
+        elif _qualifier_matches(origin, "NotRequired"):
+            marker = False
+        else:
+            marker = None
+        if marker is not None:
+            if required is not None and required != marker:
+                invalid = True
+            required = marker
+        elif _qualifier_matches(origin, "ReadOnly"):
+            if read_only is True:
+                invalid = True
+            read_only = True
+        else:
+            break
+        args = typing.get_args(current)
+        if len(args) != 1:
+            invalid = True
+            break
+        current = args[0]
+    return current, required, read_only, invalid
+
+
+def _unknown_normalized_type(annotation: Any) -> NormalizedType:
+    return NormalizedType(
+        NormalizedKind.SPECIAL,
+        SpecialType.UNKNOWN,
+        provenance=RepresentationProvenance(_carrier_name(annotation)),
+    )
+
+
+def _normalize_typed_dict(  # noqa: PLR0912, PLR0915 - ordered metadata boundary
+    expression: type[Any],
+    *,
+    state: NormalizationBudget,
+    provenance: RepresentationProvenance,
+) -> KeyShape:
+    """Extract a TypedDict ``KeyShape`` from public runtime metadata."""
+
+    completeness = ShapeCompleteness.COMPLETE
+    annotations = getattr(expression, "__annotations__", _MISSING)
+    if not isinstance(annotations, Mapping):
+        return KeyShape(
+            (),
+            ShapeOpenness.UNKNOWN,
+            completeness=ShapeCompleteness.UNKNOWN,
+            provenance=provenance,
+        )
+    annotation_items = sorted(annotations.items(), key=lambda item: str(item[0]))
+    names = {name for name, _ in annotation_items if isinstance(name, str)}
+    if len(names) != len(annotation_items):
+        completeness = ShapeCompleteness.UNKNOWN
+
+    required_keys, required_valid = _metadata_name_set(expression, "__required_keys__")
+    optional_keys, optional_valid = _metadata_name_set(expression, "__optional_keys__")
+    if required_keys is None or optional_keys is None:
+        completeness = ShapeCompleteness.UNKNOWN
+        required_keys = required_keys or set()
+        optional_keys = optional_keys or set()
+    if not required_valid or not optional_valid:
+        completeness = ShapeCompleteness.UNKNOWN
+    if required_keys & optional_keys:
+        completeness = ShapeCompleteness.UNKNOWN
+    if (required_keys | optional_keys) != names:
+        completeness = ShapeCompleteness.UNKNOWN
+
+    readonly_keys, readonly_valid = _metadata_name_set(expression, "__readonly_keys__")
+    mutable_keys, mutable_valid = _metadata_name_set(expression, "__mutable_keys__")
+    if not readonly_valid or not mutable_valid:
+        completeness = ShapeCompleteness.UNKNOWN
+    if readonly_keys is not None and mutable_keys is not None:
+        if readonly_keys & mutable_keys or (readonly_keys | mutable_keys) != names:
+            completeness = ShapeCompleteness.UNKNOWN
+    elif readonly_keys is not None and not readonly_keys <= names:
+        completeness = ShapeCompleteness.UNKNOWN
+    elif mutable_keys is not None and not mutable_keys <= names:
+        completeness = ShapeCompleteness.UNKNOWN
+
+    specs: list[tuple[str, KeySpec]] = []
+    for name, annotation in annotation_items:
+        if not isinstance(name, str):
+            continue
+        value_annotation, required_marker, read_only_marker, invalid = (
+            _unwrap_typed_dict_annotation(annotation)
+        )
+        if invalid:
+            completeness = ShapeCompleteness.UNKNOWN
+        try:
+            value_type = _normalize(value_annotation, state=state)
+        except NormalizationError:
+            value_type = _unknown_normalized_type(value_annotation)
+            completeness = ShapeCompleteness.UNKNOWN
+
+        if required_marker is not None:
+            required = required_marker
+            if required_marker and name not in required_keys:
+                completeness = ShapeCompleteness.UNKNOWN
+            if not required_marker and name not in optional_keys:
+                completeness = ShapeCompleteness.UNKNOWN
+        else:
+            required = name in required_keys
+
+        if readonly_keys is not None or mutable_keys is not None:
+            read_only = name in (readonly_keys or set())
+            if mutable_keys is not None and name in mutable_keys:
+                read_only = False
+        else:
+            read_only = bool(read_only_marker)
+        if read_only_marker is not None and read_only_marker != read_only:
+            completeness = ShapeCompleteness.UNKNOWN
+        specs.append(
+            (
+                name,
+                KeySpec(
+                    value_type=value_type,
+                    required=required,
+                    read_only=read_only,
+                    provenance=RepresentationProvenance(_carrier_name(annotation)),
+                ),
+            )
+        )
+
+    openness, extra_items, openness_complete = _normalize_typed_dict_openness(
+        expression, state=state, provenance=provenance
+    )
+    if not openness_complete:
+        completeness = ShapeCompleteness.UNKNOWN
+    return KeyShape(
+        tuple(specs),
+        openness,
+        extra_items=extra_items,
+        completeness=completeness,
+        provenance=provenance,
+    )
+
+
+def _normalize_typed_dict_openness(
+    expression: type[Any],
+    *,
+    state: NormalizationBudget,
+    provenance: RepresentationProvenance,
+) -> tuple[ShapeOpenness, KeySpec | None, bool]:
+    """Read optional closed/extra-items metadata without guessing."""
+
+    closed = getattr(expression, "__closed__", _MISSING)
+    extra = getattr(expression, "__extra_items__", _MISSING)
+    if closed is _MISSING and extra is _MISSING:
+        # Legacy TypedDict declarations are open by specification.  The
+        # absence of newer closed/extra metadata is therefore known evidence.
+        return ShapeOpenness.OPEN, None, True
+    if closed is not _MISSING and not isinstance(closed, bool):
+        return ShapeOpenness.UNKNOWN, None, False
+    if extra is _MISSING or extra is None:
+        return (
+            ShapeOpenness.CLOSED if closed is True else ShapeOpenness.OPEN,
+            None,
+            True,
+        )
+    value_annotation, _, read_only_marker, invalid = _unwrap_typed_dict_annotation(
+        extra
+    )
+    if invalid:
+        return ShapeOpenness.UNKNOWN, None, False
+    try:
+        value_type = _normalize(value_annotation, state=state)
+    except NormalizationError:
+        return ShapeOpenness.UNKNOWN, None, False
+    spec = KeySpec(
+        value_type=value_type,
+        required=False,
+        read_only=bool(read_only_marker),
+        provenance=RepresentationProvenance(_carrier_name(extra)),
+    )
+    return ShapeOpenness.EXTRA_ITEMS, spec, True
 
 
 # The standard library does not expose variance metadata for built-in generic
