@@ -593,6 +593,7 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
         ),
         None,
     )
+    matched_source_parameters: set[int] = set()
     if sum(parameter.required for parameter in source_parameters) > len(
         destination_parameters
     ):
@@ -632,6 +633,7 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
                 path + ("parameter", str(index)),
                 reason_code="protocol.method_parameters",
             )
+        matched_source_parameters.add(id(source_parameter))
         kind_compatible = _callable_parameter_kinds_compatible(
             source_parameter.kind, destination_parameter.kind
         )
@@ -681,6 +683,13 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
             return decision
         if decision.status is AssignabilityStatus.UNKNOWN:
             unknown = decision
+    if any(
+        parameter.required and id(parameter) not in matched_source_parameters
+        for parameter in source_parameters
+    ):
+        return _not_assignable(
+            path + ("parameters",), reason_code="protocol.method_parameters"
+        )
     return_decision = _evaluate(
         source.return_type, destination.return_type, context, path + ("return",)
     )

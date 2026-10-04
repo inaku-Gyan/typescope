@@ -191,6 +191,10 @@ class OptionalKeywordDestination(Protocol):
     def render(self, *, width: int = 1) -> str: ...
 
 
+class ExtraRequiredKeywordSource(Protocol):
+    def render(self, *, width: int = 1, precision: int) -> str: ...
+
+
 class UnresolvedProtocol(Protocol):
     value: "MissingProtocolValue"  # noqa: F821
 
@@ -249,6 +253,10 @@ def test_recursive_protocols_use_the_bounded_structural_relation() -> None:
 def test_protocol_method_requiredness_is_checked() -> None:
     assert (
         _status(RequiredArgument, OptionalArgument)
+        is AssignabilityStatus.NOT_ASSIGNABLE
+    )
+    assert (
+        _status(ExtraRequiredKeywordSource, OptionalKeywordDestination)
         is AssignabilityStatus.NOT_ASSIGNABLE
     )
 
