@@ -211,6 +211,7 @@ def test_protocol_inheritance_and_equivalent_shapes_are_structural() -> None:
     assert _status(ChildNamed, Named) is AssignabilityStatus.ASSIGNABLE
     assert _status(Named, ChildNamed) is AssignabilityStatus.NOT_ASSIGNABLE
     assert _status(Named, NamedEquivalent) is AssignabilityStatus.ASSIGNABLE
+    assert _status(Named, object) is AssignabilityStatus.ASSIGNABLE
 
 
 def test_protocol_member_value_mismatch_is_not_assignable() -> None:

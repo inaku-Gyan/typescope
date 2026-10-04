@@ -431,8 +431,16 @@ def _evaluate_protocols(  # noqa: PLR0911 - ordered Protocol relation branches
     if not source_is_protocol and not destination_is_protocol:
         return None
     if not destination_is_protocol:
-        # A Protocol declaration is not a nominal subtype of an arbitrary
-        # concrete destination.  Only a concrete source can use nominal rules.
+        if source_is_protocol and destination.kind is NormalizedKind.CLASS:
+            source_shape = source.value
+            destination_class = destination.value
+            if (
+                isinstance(source_shape, MemberShape)
+                and source_shape.declaration is not None
+                and isinstance(destination_class, type)
+                and issubclass(source_shape.declaration, destination_class)
+            ):
+                return _assignable(path + ("protocol.nominal",))
         return _not_assignable(
             path + ("protocol.kind",), reason_code="protocol.kind_mismatch"
         )
