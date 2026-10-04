@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import typing
 from dataclasses import dataclass, field
 from typing import Any
@@ -12,10 +13,14 @@ from ._assignability_config import (
     make_assignability_config,
 )
 from ._normalization import (
+    KeyShape,
+    KeySpec,
     NormalizationBudget,
     NormalizationError,
     NormalizedKind,
     NormalizedType,
+    ShapeCompleteness,
+    ShapeOpenness,
     SpecialType,
     generic_variances,
     normalize_type_expression,
@@ -190,6 +195,10 @@ def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
         if special is not None:
             return special
 
+        typed_dict = _evaluate_typed_dicts(source, destination, context, path)
+        if typed_dict is not None:
+            return typed_dict
+
         union = _evaluate_unions(source, destination, context, path)
         if union is not None:
             return union
@@ -238,6 +247,8 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     if source == destination and not (
         _find_special_path(source, SpecialType.UNKNOWN) is not None
         or _find_special_path(destination, SpecialType.UNKNOWN) is not None
+        or source.kind is NormalizedKind.TYPED_DICT
+        or destination.kind is NormalizedKind.TYPED_DICT
     ):
         return _assignable(path + ("identity",))
     if _is_special(source, SpecialType.NEVER):
@@ -245,6 +256,204 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
     if _is_special(destination, SpecialType.NEVER):
         return _not_assignable(path + ("special.never.destination",))
     return _evaluate_none(source, destination, path)
+
+
+def _evaluate_typed_dicts(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision | None:
+    """Compare TypedDict expressions through immutable KeyShape evidence."""
+
+    source_is_typed_dict = source.kind is NormalizedKind.TYPED_DICT
+    destination_is_typed_dict = destination.kind is NormalizedKind.TYPED_DICT
+    if not source_is_typed_dict and not destination_is_typed_dict:
+        return None
+
+    if not source_is_typed_dict or not destination_is_typed_dict:
+        return _not_assignable(
+            path + ("typeddict.kind",),
+            reason_code="typeddict.kind_mismatch",
+        )
+
+    source_shape = source.value
+    destination_shape = destination.value
+    if not isinstance(source_shape, KeyShape) or not isinstance(
+        destination_shape, KeyShape
+    ):
+        return _unknown(
+            context,
+            path + ("typeddict.shape",),
+            "typeddict.shape_unknown",
+            "TypedDict normalization did not produce KeyShape evidence",
+        )
+
+    if (
+        source_shape.completeness is not ShapeCompleteness.COMPLETE
+        or destination_shape.completeness is not ShapeCompleteness.COMPLETE
+        or source_shape.openness is ShapeOpenness.UNKNOWN
+        or destination_shape.openness is ShapeOpenness.UNKNOWN
+    ):
+        return _unknown(
+            context,
+            path + ("typeddict.shape",),
+            "typeddict.shape_unknown",
+            "TypedDict KeyShape evidence is incomplete",
+        )
+
+    return _compare_key_shapes(source_shape, destination_shape, context, path)
+
+
+def _compare_key_shapes(  # noqa: PLR0912 - explicit openness branches
+    source: KeyShape,
+    destination: KeyShape,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    """Apply TypedDict requiredness, value, mutability, and openness rules."""
+
+    source_keys = dict(source.keys)
+    destination_keys = dict(destination.keys)
+    unknown: _Decision | None = None
+
+    for name, destination_spec in destination.keys:
+        key_path = path + (_typed_dict_key_path(name),)
+        source_spec = source_keys.get(name)
+        if source_spec is None:
+            decision = _compare_missing_typed_dict_key(
+                source, destination_spec, context, key_path
+            )
+        else:
+            decision = _compare_typed_dict_key(
+                source_spec, destination_spec, context, key_path
+            )
+        if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+            return decision
+        if decision.status is AssignabilityStatus.UNKNOWN:
+            unknown = decision
+
+    destination_extra = _typed_dict_extra_spec(destination)
+    source_extra = _typed_dict_extra_spec(source)
+
+    if destination.openness is ShapeOpenness.CLOSED:
+        if source.openness is not ShapeOpenness.CLOSED:
+            return _not_assignable(
+                path + ("typeddict.openness",),
+                reason_code="typeddict.extra_keys",
+            )
+        if any(name not in destination_keys for name in source_keys):
+            return _not_assignable(
+                path + ("typeddict.extra_keys",),
+                reason_code="typeddict.extra_keys",
+            )
+    elif destination_extra is not None:
+        if source_extra is not None:
+            decision = _compare_typed_dict_key(
+                source_extra,
+                destination_extra,
+                context,
+                path + ("typeddict.extra_items",),
+            )
+            if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+                return decision
+            if decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = decision
+        for name, source_spec in source.keys:
+            if name in destination_keys:
+                continue
+            decision = _compare_typed_dict_key(
+                source_spec,
+                destination_extra,
+                context,
+                path + (_typed_dict_key_path(name), "extra_items"),
+            )
+            if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+                return decision
+            if decision.status is AssignabilityStatus.UNKNOWN:
+                unknown = decision
+
+    return unknown or _assignable(path + ("typeddict",))
+
+
+def _compare_missing_typed_dict_key(
+    source: KeyShape,
+    destination: KeySpec,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    """Compare a destination key with no explicitly known source key."""
+
+    if destination.required:
+        return _not_assignable(path + ("missing",), reason_code="typeddict.key_missing")
+
+    return _assignable(path + ("optional",))
+
+
+def _compare_typed_dict_key(  # noqa: PLR0911 - ordered key relation branches
+    source: KeySpec,
+    destination: KeySpec,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    """Compare one source and destination key specification."""
+
+    if destination.required and not source.required:
+        return _not_assignable(
+            path + ("requiredness",), reason_code="typeddict.requiredness"
+        )
+    if not destination.read_only and source.read_only:
+        return _not_assignable(path + ("readonly",), reason_code="typeddict.readonly")
+
+    forward = _evaluate(
+        source.value_type, destination.value_type, context, path + ("value",)
+    )
+    if destination.read_only:
+        return forward
+
+    reverse = _evaluate(
+        destination.value_type, source.value_type, context, path + ("value",)
+    )
+    if (
+        forward.status is AssignabilityStatus.NOT_ASSIGNABLE
+        or reverse.status is AssignabilityStatus.NOT_ASSIGNABLE
+    ):
+        if (
+            forward.status is AssignabilityStatus.UNKNOWN
+            or reverse.status is AssignabilityStatus.UNKNOWN
+        ):
+            return _unknown(
+                context,
+                path + ("value",),
+                "typeddict.value_unknown",
+                "TypedDict mutable key value compatibility could not be proven",
+            )
+        return _not_assignable(path + ("value",), reason_code="typeddict.value")
+    if forward.status is AssignabilityStatus.UNKNOWN:
+        return forward
+    if reverse.status is AssignabilityStatus.UNKNOWN:
+        return reverse
+    return _assignable(path + ("value",))
+
+
+def _typed_dict_extra_spec(shape: KeyShape) -> KeySpec | None:
+    if shape.openness is ShapeOpenness.EXTRA_ITEMS:
+        return shape.extra_items
+    if shape.openness is ShapeOpenness.OPEN:
+        return KeySpec(
+            _normalize_object_type(),
+            required=False,
+            read_only=True,
+        )
+    return None
+
+
+def _normalize_object_type() -> NormalizedType:
+    return NormalizedType(NormalizedKind.CLASS, object)
+
+
+def _typed_dict_key_path(name: str) -> str:
+    return f"typeddict.key[{json.dumps(name, ensure_ascii=False)}]"
 
 
 def _evaluate_generics(

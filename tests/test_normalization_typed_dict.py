@@ -1,6 +1,7 @@
 """TypedDict normalization and KeyShape evidence tests."""
 
-from typing import ForwardRef, NotRequired, ReadOnly, TypedDict
+import typing
+from typing import ForwardRef, NotRequired, TypedDict
 
 from typescope._normalization import (
     KeyShape,
@@ -9,6 +10,19 @@ from typescope._normalization import (
     ShapeOpenness,
     normalize_type_expression,
 )
+
+_ReadOnly = getattr(typing, "ReadOnly", None)
+
+
+class _ReadOnlyFallback:
+    """Make the fixture parse on runtimes before the ReadOnly backport."""
+
+    @classmethod
+    def __class_getitem__(cls, item: object) -> object:
+        return item
+
+
+ReadOnly = _ReadOnly or _ReadOnlyFallback
 
 
 class Profile(TypedDict):
@@ -40,7 +54,7 @@ def test_typed_dict_normalizes_to_complete_immutable_key_shape() -> None:
     keys = dict(shape.keys)
     assert keys["name"].required
     assert not keys["alias"].required
-    assert keys["identifier"].read_only
+    assert keys["identifier"].read_only is (_ReadOnly is not None)
     assert not keys["name"].read_only
 
 

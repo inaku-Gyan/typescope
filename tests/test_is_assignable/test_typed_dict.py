@@ -42,6 +42,10 @@ class OptionalUserId(TypedDict, total=False):
     user_id: int
 
 
+class EmptyUser(TypedDict):
+    pass
+
+
 def _status(source: object, destination: object) -> AssignabilityStatus:
     return evaluate_assignability(source, destination).status
 
@@ -60,7 +64,7 @@ def test_destination_required_key_must_be_present_in_source() -> None:
 
 
 def test_destination_optional_keys_may_be_absent_from_source() -> None:
-    assert _status(RequiredUser, OptionalUserId) is AssignabilityStatus.ASSIGNABLE
+    assert _status(EmptyUser, OptionalUserId) is AssignabilityStatus.ASSIGNABLE
 
 
 def test_source_extra_required_keys_are_safe() -> None:
@@ -83,6 +87,14 @@ UnresolvedValue = TypedDict(  # noqa: UP013
 
 def test_unresolved_typed_dict_value_is_capability_unknown() -> None:
     result = evaluate_assignability(UnresolvedValue, User)
+    assert result.status is AssignabilityStatus.UNKNOWN
+
+
+def test_missing_typed_dict_metadata_is_capability_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delattr(User, "__required_keys__")
+    result = evaluate_assignability(User, EquivalentUser)
     assert result.status is AssignabilityStatus.UNKNOWN
 
 
