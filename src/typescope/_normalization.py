@@ -476,7 +476,10 @@ def _protocol_member_names(expression: type[Any]) -> tuple[tuple[str, ...], bool
             name
             for name in vars(base)
             if isinstance(name, str)
-            and (not name.startswith("_") or name == "__call__")
+            and (
+                not name.startswith("_")
+                or name in {"__call__", "__getattr__", "__getattribute__"}
+            )
         )
     # An empty Protocol is complete evidence, not a missing member listing.
     return tuple(sorted(names)), True
