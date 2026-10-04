@@ -13,8 +13,12 @@ from ._assignability_config import (
     make_assignability_config,
 )
 from ._normalization import (
+    CallableShape,
     KeyShape,
     KeySpec,
+    MemberKind,
+    MemberShape,
+    MemberSpec,
     NormalizationBudget,
     NormalizationError,
     NormalizedKind,
@@ -199,6 +203,10 @@ def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
         if typed_dict is not None:
             return typed_dict
 
+        protocol = _evaluate_protocols(source, destination, context, path)
+        if protocol is not None:
+            return protocol
+
         union = _evaluate_unions(source, destination, context, path)
         if union is not None:
             return union
@@ -249,6 +257,8 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
         or _find_special_path(destination, SpecialType.UNKNOWN) is not None
         or source.kind is NormalizedKind.TYPED_DICT
         or destination.kind is NormalizedKind.TYPED_DICT
+        or source.kind is NormalizedKind.PROTOCOL
+        or destination.kind is NormalizedKind.PROTOCOL
     ):
         return _assignable(path + ("identity",))
     if _is_special(source, SpecialType.NEVER):
@@ -303,6 +313,229 @@ def _evaluate_typed_dicts(
         )
 
     return _compare_key_shapes(source_shape, destination_shape, context, path)
+
+
+def _evaluate_protocols(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision | None:
+    """Compare Protocols and safe concrete member-shape sources."""
+
+    source_is_protocol = source.kind is NormalizedKind.PROTOCOL
+    destination_is_protocol = destination.kind is NormalizedKind.PROTOCOL
+    if not source_is_protocol and not destination_is_protocol:
+        return None
+    if not destination_is_protocol:
+        # A Protocol declaration is not a nominal subtype of an arbitrary
+        # concrete destination.  Only a concrete source can use nominal rules.
+        return _not_assignable(
+            path + ("protocol.kind",), reason_code="protocol.kind_mismatch"
+        )
+
+    destination_shape = destination.value
+    if not isinstance(destination_shape, MemberShape):
+        return _unknown(
+            context,
+            path + ("protocol.shape",),
+            "protocol.shape_unknown",
+            "Protocol normalization did not produce MemberShape evidence",
+        )
+    if source_is_protocol:
+        source_shape = source.value
+    else:
+        source_shape = source.member_shape
+    if not isinstance(source_shape, MemberShape):
+        return _unknown(
+            context,
+            path + ("protocol.shape",),
+            "protocol.shape_unknown",
+            "the concrete source has no explicit safe MemberShape provider",
+        )
+    if (
+        source_shape.completeness is not ShapeCompleteness.COMPLETE
+        or destination_shape.completeness is not ShapeCompleteness.COMPLETE
+    ):
+        return _unknown(
+            context,
+            path + ("protocol.shape",),
+            "protocol.shape_unknown",
+            "Protocol member evidence is incomplete",
+        )
+    return _compare_member_shapes(source_shape, destination_shape, context, path)
+
+
+def _compare_member_shapes(
+    source: MemberShape,
+    destination: MemberShape,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    source_members = dict(source.members)
+    unknown: _Decision | None = None
+    for name, destination_spec in destination.members:
+        member_path = path + (_protocol_member_path(name),)
+        source_spec = source_members.get(name)
+        if source_spec is None:
+            return _not_assignable(
+                member_path + ("missing",), reason_code="protocol.member_missing"
+            )
+        decision = _compare_member_spec(
+            source_spec, destination_spec, context, member_path
+        )
+        if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+            return decision
+        if decision.status is AssignabilityStatus.UNKNOWN:
+            unknown = decision
+    return unknown or _assignable(path + ("protocol",))
+
+
+def _compare_member_spec(  # noqa: PLR0911 - ordered member relation branches
+    source: MemberSpec,
+    destination: MemberSpec,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    if destination.kind is MemberKind.METHOD:
+        if source.kind is not MemberKind.METHOD:
+            return _not_assignable(path + ("kind",), reason_code="protocol.member_kind")
+        if source.signature is None or destination.signature is None:
+            return _unknown(
+                context,
+                path + ("method",),
+                "protocol.method_signature_unknown",
+                "Protocol method signature evidence is unavailable",
+            )
+        return _compare_callable_shapes(
+            source.signature, destination.signature, context, path + ("method",)
+        )
+    if source.kind is MemberKind.METHOD:
+        return _not_assignable(path + ("kind",), reason_code="protocol.member_kind")
+    if not destination.read_only and source.read_only:
+        return _not_assignable(
+            path + ("mutability",), reason_code="protocol.mutability"
+        )
+    if source.value_type is None or destination.value_type is None:
+        return _unknown(
+            context,
+            path + ("value",),
+            "protocol.member_type_unknown",
+            "Protocol member type evidence is unavailable",
+        )
+    forward = _evaluate(
+        source.value_type, destination.value_type, context, path + ("value",)
+    )
+    if destination.read_only:
+        return forward
+    reverse = _evaluate(
+        destination.value_type, source.value_type, context, path + ("value",)
+    )
+    if (
+        forward.status is AssignabilityStatus.NOT_ASSIGNABLE
+        or reverse.status is AssignabilityStatus.NOT_ASSIGNABLE
+    ):
+        if (
+            forward.status is AssignabilityStatus.UNKNOWN
+            or reverse.status is AssignabilityStatus.UNKNOWN
+        ):
+            return _unknown(
+                context,
+                path + ("value",),
+                "protocol.member_type_unknown",
+                "Protocol mutable member compatibility could not be proven",
+            )
+        return _not_assignable(path + ("value",), reason_code="protocol.member_type")
+    if forward.status is AssignabilityStatus.UNKNOWN:
+        return forward
+    if reverse.status is AssignabilityStatus.UNKNOWN:
+        return reverse
+    return _assignable(path + ("member",))
+
+
+def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape rules
+    source: CallableShape,
+    destination: CallableShape,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision:
+    if (
+        source.completeness is not ShapeCompleteness.COMPLETE
+        or destination.completeness is not ShapeCompleteness.COMPLETE
+        or source.return_type is None
+        or destination.return_type is None
+    ):
+        return _unknown(
+            context,
+            path,
+            "protocol.method_signature_unknown",
+            "callable member signature evidence is incomplete",
+        )
+    source_parameters = source.parameters
+    destination_parameters = destination.parameters
+    unknown: _Decision | None = None
+    if sum(parameter.required for parameter in source_parameters) > len(
+        destination_parameters
+    ):
+        return _not_assignable(
+            path + ("parameters",), reason_code="protocol.method_parameters"
+        )
+    for index, destination_parameter in enumerate(destination_parameters):
+        if index >= len(source_parameters):
+            if destination_parameter.required:
+                return _not_assignable(
+                    path + ("parameter", str(index)),
+                    reason_code="protocol.method_parameters",
+                )
+            continue
+        source_parameter = source_parameters[index]
+        if source_parameter.kind != destination_parameter.kind:
+            return _not_assignable(
+                path + ("parameter", str(index)),
+                reason_code="protocol.method_parameters",
+            )
+        if (
+            destination_parameter.kind in {"POSITIONAL_OR_KEYWORD", "KEYWORD_ONLY"}
+            and source_parameter.name != destination_parameter.name
+        ):
+            return _not_assignable(
+                path + ("parameter", str(index)),
+                reason_code="protocol.method_parameters",
+            )
+        if destination_parameter.required and not source_parameter.required:
+            pass
+        if (
+            source_parameter.value_type is None
+            or destination_parameter.value_type is None
+        ):
+            return _unknown(
+                context,
+                path + ("parameter", str(index)),
+                "protocol.method_signature_unknown",
+                "callable parameter type evidence is unavailable",
+            )
+        decision = _evaluate(
+            destination_parameter.value_type,
+            source_parameter.value_type,
+            context,
+            path + ("parameter", str(index)),
+        )
+        if decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+            return decision
+        if decision.status is AssignabilityStatus.UNKNOWN:
+            unknown = decision
+    return_decision = _evaluate(
+        source.return_type, destination.return_type, context, path + ("return",)
+    )
+    if return_decision.status is AssignabilityStatus.NOT_ASSIGNABLE:
+        return return_decision
+    if return_decision.status is AssignabilityStatus.UNKNOWN:
+        unknown = return_decision
+    return unknown or _assignable(path + ("callable",))
+
+
+def _protocol_member_path(name: str) -> str:
+    return f"protocol.member[{json.dumps(name, ensure_ascii=False)}]"
 
 
 def _compare_key_shapes(  # noqa: PLR0912 - explicit openness branches
