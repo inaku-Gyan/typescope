@@ -496,7 +496,7 @@ def _normalize_typed_dict(  # noqa: PLR0912, PLR0915 - ordered metadata boundary
     )
 
 
-def _normalize_typed_dict_openness(
+def _normalize_typed_dict_openness(  # noqa: PLR0911 - explicit openness branches
     expression: type[Any],
     *,
     state: NormalizationBudget,
@@ -519,6 +519,8 @@ def _normalize_typed_dict_openness(
             None,
             True,
         )
+    if _is_never_type(extra):
+        return ShapeOpenness.CLOSED, None, True
     value_annotation, _, read_only_marker, invalid = _unwrap_typed_dict_annotation(
         extra
     )
@@ -545,6 +547,16 @@ def _no_extra_items_sentinel() -> object:
         if sentinel is not _MISSING:
             return sentinel
     return _MISSING
+
+
+def _is_never_type(expression: object) -> bool:
+    """Recognize ``Never`` sentinels used for closed extra-item metadata."""
+
+    return any(
+        expression is getattr(module, name, None)
+        for module in (typing, _typing_extensions)
+        for name in ("Never", "NoReturn")
+    )
 
 
 # The standard library does not expose variance metadata for built-in generic
