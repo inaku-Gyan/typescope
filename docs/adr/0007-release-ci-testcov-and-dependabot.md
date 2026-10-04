@@ -44,6 +44,8 @@ configuration are removed rather than treated as compatibility surfaces.
 summary, and writes `coverage.xml`. Every test-matrix job enforces the threshold. The XML is
 retained as a CI artifact; one designated job uploads it to Codecov to avoid duplicate reports.
 Codecov transport or service failure is a warning and does not hide a test or threshold failure.
+The version-controlled `codecov.yml` keeps project and patch status targets at the same 70%
+minimum instead of inheriting a moving target from the previous commit's coverage.
 HTML output is optional local convenience and is not a release gate.
 
 ### OIDC publication
