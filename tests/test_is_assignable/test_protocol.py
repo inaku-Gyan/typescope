@@ -171,12 +171,24 @@ class VariadicDestination(Protocol):
     def render(self, width: int, extra: int) -> str: ...
 
 
+class OnlyVariadicSource(Protocol):
+    def render(self, *extra: int) -> str: ...
+
+
 class KeywordSource(Protocol):
     def render(self, **values: int) -> str: ...
 
 
 class KeywordDestination(Protocol):
     def render(self, *, width: int) -> str: ...
+
+
+class OptionalPositionalDestination(Protocol):
+    def render(self, width: int = 1, /) -> str: ...
+
+
+class OptionalKeywordDestination(Protocol):
+    def render(self, *, width: int = 1) -> str: ...
 
 
 class UnresolvedProtocol(Protocol):
@@ -250,6 +262,14 @@ def test_protocol_methods_allow_safe_positional_and_variadic_sources() -> None:
         _status(VariadicSource, VariadicDestination) is AssignabilityStatus.ASSIGNABLE
     )
     assert _status(KeywordSource, KeywordDestination) is AssignabilityStatus.ASSIGNABLE
+    assert (
+        _status(OnlyVariadicSource, OptionalPositionalDestination)
+        is AssignabilityStatus.ASSIGNABLE
+    )
+    assert (
+        _status(KeywordSource, OptionalKeywordDestination)
+        is AssignabilityStatus.ASSIGNABLE
+    )
 
 
 def test_nested_protocol_members_are_compared_structurally() -> None:

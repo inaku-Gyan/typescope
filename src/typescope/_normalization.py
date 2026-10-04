@@ -809,7 +809,12 @@ def _normalize_callable_shape(
                 parameter.name,
                 parameter.kind.name,
                 value_type,
-                parameter.default is inspect.Parameter.empty,
+                parameter.default is inspect.Parameter.empty
+                and parameter.kind
+                not in {
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                },
                 RepresentationProvenance(_carrier_name(parameter.annotation))
                 if parameter.annotation is not inspect.Parameter.empty
                 else None,
