@@ -30,6 +30,7 @@ __all__ = [
     "CallableShape",
     "MemberSpec",
     "MemberShape",
+    "ProtocolReference",
     "generic_variances",
     "normalize_type_expression",
     "project_generic_arguments",
@@ -46,6 +47,7 @@ class NormalizedKind(StrEnum):
     UNION = "union"
     TYPED_DICT = "typeddict"
     PROTOCOL = "protocol"
+    PROTOCOL_REFERENCE = "protocol_reference"
 
 
 class SpecialType(StrEnum):
@@ -93,6 +95,8 @@ class NormalizationBudget:
     """Mutable budget shared by both operands in one evaluation."""
 
     remaining: int = 64
+    protocol_shapes: dict[type[Any], MemberShape] = field(default_factory=dict)
+    protocol_stack: set[type[Any]] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +211,7 @@ class MemberShape:
         default=RepresentationProvenance("unknown"), compare=False, hash=False
     )
     provider: str = "protocol"
+    declaration: type[Any] | None = field(default=None, compare=False, hash=False)
 
     def __post_init__(self) -> None:
         names = tuple(name for name, _ in self.members)
@@ -219,6 +224,14 @@ class MemberShape:
         """Return a read-only mapping view for member lookup."""
 
         return MappingProxyType(dict(self.members))
+
+
+@dataclass(frozen=True, slots=True)
+class ProtocolReference:
+    """Lazy normalized reference used for recursive Protocol members."""
+
+    declaration: type[Any] = field(compare=False, hash=False)
+    shape: MemberShape | None = field(default=None, compare=False, hash=False)
 
 
 # Short aliases keep the vocabulary convenient for callers while the prefixed
@@ -303,12 +316,30 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
         )
 
     if _is_protocol(expression):
+        if expression in state.protocol_shapes:
+            shape = state.protocol_shapes[expression]
+            return NormalizedType(
+                NormalizedKind.PROTOCOL,
+                shape,
+                provenance=provenance,
+                shape=shape,
+                member_shape=shape,
+            )
+        if expression in state.protocol_stack:
+            return NormalizedType(
+                NormalizedKind.PROTOCOL_REFERENCE,
+                ProtocolReference(expression),
+                provenance=provenance,
+            )
+        state.protocol_stack.add(expression)
         shape = _normalize_member_shape(
             expression,
             state=state,
             provenance=provenance,
             provider="protocol",
         )
+        state.protocol_stack.remove(expression)
+        state.protocol_shapes[expression] = shape
         return NormalizedType(
             NormalizedKind.PROTOCOL,
             shape,
@@ -447,7 +478,8 @@ def _protocol_member_names(expression: type[Any]) -> tuple[tuple[str, ...], bool
             if isinstance(name, str)
             and (not name.startswith("_") or name == "__call__")
         )
-    return tuple(sorted(names)), bool(names or expression is typing.Protocol)
+    # An empty Protocol is complete evidence, not a missing member listing.
+    return tuple(sorted(names)), True
 
 
 def _normalize_class_member_shape(
@@ -505,7 +537,7 @@ def _normalize_class_member_shape(
         state=state,
         provenance=provenance,
         provider=provider,
-        protocol=False,
+        declaration=expression,
     )
     if any(
         name in vars(base)
@@ -518,6 +550,7 @@ def _normalize_class_member_shape(
             completeness=ShapeCompleteness.UNKNOWN,
             provenance=shape.provenance,
             provider=shape.provider,
+            declaration=shape.declaration,
         )
     return shape
 
@@ -536,8 +569,8 @@ def _normalize_member_shape(
         state=state,
         provenance=provenance,
         provider=provider,
-        protocol=True,
         names_complete=names_complete,
+        declaration=expression,
     )
 
 
@@ -548,8 +581,8 @@ def _build_member_shape(  # noqa: PLR0913 - shape extraction carries explicit ev
     state: NormalizationBudget,
     provenance: RepresentationProvenance,
     provider: str,
-    protocol: bool,
     names_complete: bool = True,
+    declaration: type[Any] | None = None,
 ) -> MemberShape:
     """Build a MemberShape without executing descriptors or annotations."""
 
@@ -601,6 +634,7 @@ def _build_member_shape(  # noqa: PLR0913 - shape extraction carries explicit ev
         completeness=completeness,
         provenance=provenance,
         provider=provider,
+        declaration=declaration,
     )
 
 
@@ -663,6 +697,10 @@ def _extract_member_spec(  # noqa: PLR0911 - ordered descriptor branches
         if raw is _MISSING:
             return None, False
         return None, False
+    if raw is not _MISSING and _is_unsafe_descriptor(raw):
+        # Accessing arbitrary descriptors could execute user code and does not
+        # provide a safe static member type.
+        return None, False
     if _is_unsupported_member_qualifier(annotation):
         return None, False
     value_type, complete = _normalize_member_annotation(
@@ -687,6 +725,16 @@ def _extract_member_spec(  # noqa: PLR0911 - ordered descriptor branches
     ), complete
 
 
+def _is_unsafe_descriptor(value: object) -> bool:
+    """Detect descriptor protocols from static class dictionaries only."""
+
+    return any(
+        name in vars(base)
+        for base in type(value).__mro__
+        for name in ("__get__", "__set__", "__delete__")
+    )
+
+
 def _is_unsupported_member_qualifier(annotation: Any) -> bool:
     origin = typing.get_origin(annotation)
     return origin in {
@@ -695,7 +743,7 @@ def _is_unsupported_member_qualifier(annotation: Any) -> bool:
     }
 
 
-def _normalize_member_annotation(
+def _normalize_member_annotation(  # noqa: PLR0911 - ordered annotation boundary
     annotation: Any,
     *,
     owner: type[Any],
@@ -703,13 +751,28 @@ def _normalize_member_annotation(
 ) -> tuple[NormalizedType, bool]:
     if isinstance(annotation, str):
         if annotation in {owner.__name__, owner.__qualname__}:
-            return NormalizedType(NormalizedKind.CLASS, owner), True
+            return (
+                NormalizedType(
+                    NormalizedKind.PROTOCOL_REFERENCE,
+                    ProtocolReference(owner),
+                ),
+                True,
+            )
         return _unknown_normalized_type(annotation), False
     forward_arg = getattr(annotation, "__forward_arg__", None)
     if isinstance(forward_arg, str):
         if forward_arg in {owner.__name__, owner.__qualname__}:
-            return NormalizedType(NormalizedKind.CLASS, owner), True
+            return (
+                NormalizedType(
+                    NormalizedKind.PROTOCOL_REFERENCE,
+                    ProtocolReference(owner),
+                ),
+                True,
+            )
         return _unknown_normalized_type(annotation), False
+    if isinstance(annotation, type) and _is_protocol(annotation):
+        normalized = _normalize(annotation, state=state)
+        return normalized, normalized.kind is not NormalizedKind.PROTOCOL_REFERENCE
     try:
         return _normalize(annotation, state=state), True
     except (NormalizationError, AttributeError, TypeError, ValueError):
@@ -1560,6 +1623,13 @@ def _semantic_sort_key(  # noqa: PLR0911 - one branch per normalized kind
         return (
             expression.kind.value,
             f"{shape.completeness.value}:{members}",
+        )
+    if expression.kind is NormalizedKind.PROTOCOL_REFERENCE:
+        reference = expression.value
+        assert isinstance(reference, ProtocolReference)
+        return (
+            expression.kind.value,
+            f"{reference.declaration.__module__}.{reference.declaration.__qualname__}",
         )
     return (
         expression.kind.value,

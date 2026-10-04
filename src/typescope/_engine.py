@@ -23,6 +23,7 @@ from ._normalization import (
     NormalizationError,
     NormalizedKind,
     NormalizedType,
+    ProtocolReference,
     ShapeCompleteness,
     ShapeOpenness,
     SpecialType,
@@ -56,6 +57,7 @@ class EvaluationContext:
         default_factory=set
     )
     typevar_bindings: dict[typing.TypeVar, NormalizedType] = field(default_factory=dict)
+    protocol_shapes: dict[type[Any], MemberShape] = field(default_factory=dict)
     current_rule_path: tuple[str, ...] = ()
     capability_evidence: list[str] = field(default_factory=list)
     representation_provenance: list[str] = field(default_factory=list)
@@ -115,6 +117,13 @@ def evaluate_native(
         context.representation_provenance.append(
             normalized_destination.provenance.carrier
         )
+        for normalized in (normalized_source, normalized_destination):
+            if (
+                normalized.kind is NormalizedKind.PROTOCOL
+                and isinstance(normalized.value, MemberShape)
+                and normalized.value.declaration is not None
+            ):
+                context.protocol_shapes[normalized.value.declaration] = normalized.value
     except NormalizationError as exc:
         context.capability_evidence.append(exc.reason_code)
         return _Decision(
@@ -187,6 +196,8 @@ def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
 
     pair = (source, destination)
     if pair in context.visited_pairs:
+        if _is_protocol_reference_pair(source, destination, context):
+            return _assignable(path + ("protocol.recursive",))
         return _unknown(
             context,
             path,
@@ -206,6 +217,12 @@ def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
         protocol = _evaluate_protocols(source, destination, context, path)
         if protocol is not None:
             return protocol
+
+        protocol_reference = _evaluate_protocol_references(
+            source, destination, context, path
+        )
+        if protocol_reference is not None:
+            return protocol_reference
 
         union = _evaluate_unions(source, destination, context, path)
         if union is not None:
@@ -259,6 +276,8 @@ def _evaluate_specials(  # noqa: PLR0911 - ordered special-type dispatch
         or destination.kind is NormalizedKind.TYPED_DICT
         or source.kind is NormalizedKind.PROTOCOL
         or destination.kind is NormalizedKind.PROTOCOL
+        or source.kind is NormalizedKind.PROTOCOL_REFERENCE
+        or destination.kind is NormalizedKind.PROTOCOL_REFERENCE
     ):
         return _assignable(path + ("identity",))
     if _is_special(source, SpecialType.NEVER):
@@ -315,7 +334,56 @@ def _evaluate_typed_dicts(
     return _compare_key_shapes(source_shape, destination_shape, context, path)
 
 
-def _evaluate_protocols(
+def _is_protocol_reference_pair(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+) -> bool:
+    return (
+        _protocol_shape_for_normalized(source, context) is not None
+        and _protocol_shape_for_normalized(destination, context) is not None
+        and (
+            source.kind is NormalizedKind.PROTOCOL_REFERENCE
+            or destination.kind is NormalizedKind.PROTOCOL_REFERENCE
+        )
+    )
+
+
+def _protocol_shape_for_normalized(
+    expression: NormalizedType, context: EvaluationContext
+) -> MemberShape | None:
+    if expression.kind is NormalizedKind.PROTOCOL and isinstance(
+        expression.value, MemberShape
+    ):
+        return expression.value
+    if expression.kind is not NormalizedKind.PROTOCOL_REFERENCE or not isinstance(
+        expression.value, ProtocolReference
+    ):
+        return None
+    return expression.value.shape or context.protocol_shapes.get(
+        expression.value.declaration
+    )
+
+
+def _evaluate_protocol_references(
+    source: NormalizedType,
+    destination: NormalizedType,
+    context: EvaluationContext,
+    path: tuple[str, ...],
+) -> _Decision | None:
+    source_shape = _protocol_shape_for_normalized(source, context)
+    destination_shape = _protocol_shape_for_normalized(destination, context)
+    if source_shape is None or destination_shape is None:
+        return None
+    if (
+        source.kind is not NormalizedKind.PROTOCOL_REFERENCE
+        and destination.kind is not NormalizedKind.PROTOCOL_REFERENCE
+    ):
+        return None
+    return _compare_member_shapes(source_shape, destination_shape, context, path)
+
+
+def _evaluate_protocols(  # noqa: PLR0911 - ordered Protocol relation branches
     source: NormalizedType,
     destination: NormalizedType,
     context: EvaluationContext,
@@ -325,6 +393,11 @@ def _evaluate_protocols(
 
     source_is_protocol = source.kind is NormalizedKind.PROTOCOL
     destination_is_protocol = destination.kind is NormalizedKind.PROTOCOL
+    if (
+        source.kind is NormalizedKind.PROTOCOL_REFERENCE
+        or destination.kind is NormalizedKind.PROTOCOL_REFERENCE
+    ):
+        return None
     if not source_is_protocol and not destination_is_protocol:
         return None
     if not destination_is_protocol:
@@ -482,12 +555,10 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
         )
     for index, destination_parameter in enumerate(destination_parameters):
         if index >= len(source_parameters):
-            if destination_parameter.required:
-                return _not_assignable(
-                    path + ("parameter", str(index)),
-                    reason_code="protocol.method_parameters",
-                )
-            continue
+            return _not_assignable(
+                path + ("parameter", str(index)),
+                reason_code="protocol.method_parameters",
+            )
         source_parameter = source_parameters[index]
         if source_parameter.kind != destination_parameter.kind:
             return _not_assignable(
@@ -502,8 +573,11 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
                 path + ("parameter", str(index)),
                 reason_code="protocol.method_parameters",
             )
-        if destination_parameter.required and not source_parameter.required:
-            pass
+        if not destination_parameter.required and source_parameter.required:
+            return _not_assignable(
+                path + ("parameter", str(index)),
+                reason_code="protocol.method_parameters",
+            )
         if (
             source_parameter.value_type is None
             or destination_parameter.value_type is None

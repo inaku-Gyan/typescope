@@ -76,6 +76,15 @@ class DynamicSource:
         return None
 
 
+class UnsafeDescriptor:
+    def __get__(self, instance: object, owner: type[object]) -> int:
+        return 1
+
+
+class UnsafeSource:
+    value: int = UnsafeDescriptor()
+
+
 @dataclass
 class DataRecord:
     name: str
@@ -91,6 +100,46 @@ class OtherDataRecord:
     name: str
     identifier: int
     width: int
+
+
+class RecursiveLeft(Protocol):
+    next: "RecursiveLeft"
+
+
+class RecursiveRight(Protocol):
+    next: "RecursiveRight"
+
+
+class NestedLeft(Protocol):
+    value: int
+
+
+class NestedRight(Protocol):
+    value: int
+
+
+class ParentLeft(Protocol):
+    child: NestedLeft
+
+
+class ParentRight(Protocol):
+    child: NestedRight
+
+
+class OptionalArgument(Protocol):
+    def render(self, width: int, precision: int = 1) -> str: ...
+
+
+class RequiredArgument(Protocol):
+    def render(self, width: int, precision: int) -> str: ...
+
+
+class UnresolvedProtocol(Protocol):
+    value: "MissingProtocolValue"  # noqa: F821
+
+
+if TYPE_CHECKING:
+    MissingProtocolValue: object
 
 
 def _status(source: object, destination: object) -> AssignabilityStatus:
@@ -124,6 +173,7 @@ def test_unresolved_or_dynamic_concrete_evidence_is_unknown() -> None:
     protocol = type("ValueProtocol", (Protocol,), {"__annotations__": {"value": int}})
     assert _status(UnresolvedSource, protocol) is AssignabilityStatus.UNKNOWN
     assert _status(DynamicSource, protocol) is AssignabilityStatus.UNKNOWN
+    assert _status(UnsafeSource, protocol) is AssignabilityStatus.UNKNOWN
 
 
 def test_dataclass_fields_are_controlled_protocol_source_evidence() -> None:
@@ -132,3 +182,24 @@ def test_dataclass_fields_are_controlled_protocol_source_evidence() -> None:
 
 def test_dataclasses_remain_nominal_to_each_other() -> None:
     assert _status(DataRecord, OtherDataRecord) is AssignabilityStatus.NOT_ASSIGNABLE
+
+
+def test_recursive_protocols_use_the_bounded_structural_relation() -> None:
+    assert _status(RecursiveLeft, RecursiveRight) is AssignabilityStatus.ASSIGNABLE
+
+
+def test_protocol_method_requiredness_is_checked() -> None:
+    assert (
+        _status(RequiredArgument, OptionalArgument)
+        is AssignabilityStatus.NOT_ASSIGNABLE
+    )
+
+
+def test_nested_protocol_members_are_compared_structurally() -> None:
+    assert _status(ParentLeft, ParentRight) is AssignabilityStatus.ASSIGNABLE
+
+
+def test_incomplete_protocol_identity_remains_unknown() -> None:
+    assert (
+        _status(UnresolvedProtocol, UnresolvedProtocol) is AssignabilityStatus.UNKNOWN
+    )
