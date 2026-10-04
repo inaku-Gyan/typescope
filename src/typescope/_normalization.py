@@ -1026,7 +1026,17 @@ def _semantic_sort_key(expression: NormalizedType) -> tuple[str, str]:
             f"{':'.join(_semantic_sort_key(spec.value_type))}"
             for name, spec in shape.keys
         )
-        return (expression.kind.value, f"{shape.openness.value}:{keys}")
+        extra = ""
+        if shape.extra_items is not None:
+            extra = (
+                ":extra="
+                f"{int(shape.extra_items.read_only)}:"
+                f"{':'.join(_semantic_sort_key(shape.extra_items.value_type))}"
+            )
+        return (
+            expression.kind.value,
+            f"{shape.openness.value}:{shape.completeness.value}:{keys}{extra}",
+        )
     return (
         expression.kind.value,
         ",".join(":".join(_semantic_sort_key(member)) for member in expression.members),
