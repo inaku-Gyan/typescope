@@ -990,6 +990,15 @@ def _semantic_sort_key(expression: NormalizedType) -> tuple[str, str]:
         return (expression.kind.value, value.__name__)
     if expression.kind is NormalizedKind.SPECIAL:
         return (expression.kind.value, str(expression.value))
+    if expression.kind is NormalizedKind.TYPED_DICT:
+        shape = expression.value
+        assert isinstance(shape, KeyShape)
+        keys = ",".join(
+            f"{name}:{int(spec.required)}:{int(spec.read_only)}:"
+            f"{':'.join(_semantic_sort_key(spec.value_type))}"
+            for name, spec in shape.keys
+        )
+        return (expression.kind.value, f"{shape.openness.value}:{keys}")
     return (
         expression.kind.value,
         ",".join(":".join(_semantic_sort_key(member)) for member in expression.members),
