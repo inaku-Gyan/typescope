@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
 import types
 import typing
 from collections import abc as collections_abc
@@ -23,6 +25,11 @@ __all__ = [
     "Openness",
     "KeySpec",
     "KeyShape",
+    "MemberKind",
+    "ParameterSpec",
+    "CallableShape",
+    "MemberSpec",
+    "MemberShape",
     "generic_variances",
     "normalize_type_expression",
     "project_generic_arguments",
@@ -38,6 +45,7 @@ class NormalizedKind(StrEnum):
     TYPEVAR = "typevar"
     UNION = "union"
     TYPED_DICT = "typeddict"
+    PROTOCOL = "protocol"
 
 
 class SpecialType(StrEnum):
@@ -97,7 +105,10 @@ class NormalizedType:
     provenance: RepresentationProvenance = field(
         default=RepresentationProvenance("unknown"), compare=False, hash=False
     )
-    shape: KeyShape | None = field(default=None, compare=False, hash=False)
+    shape: KeyShape | MemberShape | None = field(
+        default=None, compare=False, hash=False
+    )
+    member_shape: MemberShape | None = field(default=None, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +148,77 @@ class KeyShape:
         """Return a read-only mapping view for callers that need lookup."""
 
         return MappingProxyType(dict(self.keys))
+
+
+class MemberKind(StrEnum):
+    """Kinds of members represented by a structural object shape."""
+
+    ATTRIBUTE = "attribute"
+    PROPERTY = "property"
+    METHOD = "method"
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterSpec:
+    """Immutable evidence for one callable parameter."""
+
+    name: str
+    kind: str
+    value_type: NormalizedType | None
+    required: bool
+    provenance: RepresentationProvenance | None = field(
+        default=None, compare=False, hash=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CallableShape:
+    """Immutable, bounded evidence for a callable member signature."""
+
+    parameters: tuple[ParameterSpec, ...]
+    return_type: NormalizedType | None
+    completeness: ShapeCompleteness = ShapeCompleteness.COMPLETE
+    provenance: RepresentationProvenance = field(
+        default=RepresentationProvenance("unknown"), compare=False, hash=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MemberSpec:
+    """Immutable evidence describing one object member."""
+
+    value_type: NormalizedType | None
+    kind: MemberKind
+    read_only: bool = False
+    required: bool = True
+    signature: CallableShape | None = None
+    provenance: RepresentationProvenance | None = field(
+        default=None, compare=False, hash=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MemberShape:
+    """Immutable structural evidence for Protocols and safe class sources."""
+
+    members: tuple[tuple[str, MemberSpec], ...]
+    completeness: ShapeCompleteness = ShapeCompleteness.COMPLETE
+    provenance: RepresentationProvenance = field(
+        default=RepresentationProvenance("unknown"), compare=False, hash=False
+    )
+    provider: str = "protocol"
+
+    def __post_init__(self) -> None:
+        names = tuple(name for name, _ in self.members)
+        if len(names) != len(set(names)):
+            raise ValueError("MemberShape contains duplicate members")
+        if any(not isinstance(name, str) for name in names):
+            raise TypeError("MemberShape member names must be strings")
+
+    def as_mapping(self) -> Mapping[str, MemberSpec]:
+        """Return a read-only mapping view for member lookup."""
+
+        return MappingProxyType(dict(self.members))
 
 
 # Short aliases keep the vocabulary convenient for callers while the prefixed
@@ -220,6 +302,21 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
             shape=shape,
         )
 
+    if _is_protocol(expression):
+        shape = _normalize_member_shape(
+            expression,
+            state=state,
+            provenance=provenance,
+            provider="protocol",
+        )
+        return NormalizedType(
+            NormalizedKind.PROTOCOL,
+            shape,
+            provenance=provenance,
+            shape=shape,
+            member_shape=shape,
+        )
+
     if isinstance(expression, typing.TypeVar):
         return NormalizedType(
             NormalizedKind.TYPEVAR,
@@ -267,10 +364,14 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
                 expression,
                 provenance=provenance,
             )
+        member_shape = _normalize_class_member_shape(
+            expression, state=state, provenance=provenance
+        )
         return NormalizedType(
             NormalizedKind.CLASS,
             expression,
             provenance=provenance,
+            member_shape=member_shape,
         )
 
     if origin is not None and _is_generic_origin(origin):
@@ -293,6 +394,407 @@ def _normalize(  # noqa: PLR0911, PLR0912 - ordered typing-form boundary
 def _carrier_name(expression: Any) -> str:
     carrier = type(expression)
     return f"{carrier.__module__}.{carrier.__qualname__}"
+
+
+def _is_protocol(expression: Any) -> bool:
+    """Detect Protocol declarations through feature-detected public helpers."""
+
+    for module in (
+        typing,
+        _typing_extensions if "_typing_extensions" in globals() else None,
+    ):
+        detector = getattr(module, "is_protocol", None)
+        if detector is None:
+            continue
+        try:
+            if detector(expression):
+                return True
+        except (AttributeError, TypeError):
+            continue
+    # Python 3.11/3.12 have no public detector.  The private marker is used
+    # only as a compatibility probe; it never becomes semantic identity.
+    return isinstance(expression, type) and bool(
+        getattr(expression, "_is_protocol", False)
+    )
+
+
+def _protocol_member_names(expression: type[Any]) -> tuple[tuple[str, ...], bool]:
+    """Return declared and inherited Protocol member names plus evidence state."""
+
+    for module in (typing, _typing_extensions):
+        getter = getattr(module, "get_protocol_members", None)
+        if getter is None:
+            continue
+        try:
+            names = getter(expression)
+        except (AttributeError, TypeError):
+            continue
+        if isinstance(names, (set, frozenset, tuple, list)) and all(
+            isinstance(name, str) for name in names
+        ):
+            return tuple(sorted(names)), True
+
+    names: set[str] = set()
+    for base in getattr(expression, "__mro__", (expression,)):
+        if base in {typing.Protocol, typing.Generic, object}:
+            continue
+        annotations = vars(base).get("__annotations__", {})
+        if isinstance(annotations, Mapping):
+            names.update(name for name in annotations if isinstance(name, str))
+        names.update(
+            name
+            for name in vars(base)
+            if isinstance(name, str)
+            and (not name.startswith("_") or name == "__call__")
+        )
+    return tuple(sorted(names)), bool(names or expression is typing.Protocol)
+
+
+def _normalize_class_member_shape(
+    expression: type[Any],
+    *,
+    state: NormalizationBudget,
+    provenance: RepresentationProvenance,
+) -> MemberShape | None:
+    """Extract safe static evidence for a concrete class when available."""
+
+    if expression.__module__ == "builtins":
+        return None
+    provider = "dataclass" if dataclasses.is_dataclass(expression) else "class"
+    transformed = any(
+        "__dataclass_transform__" in vars(base)
+        for base in getattr(expression, "__mro__", (expression,))
+    )
+    if transformed and provider != "dataclass":
+        return MemberShape(
+            (),
+            completeness=ShapeCompleteness.UNKNOWN,
+            provenance=provenance,
+            provider="unregistered",
+        )
+    names: set[str] = set()
+    for base in getattr(expression, "__mro__", (expression,)):
+        if base is object:
+            continue
+        annotations = vars(base).get("__annotations__", {})
+        if isinstance(annotations, Mapping):
+            names.update(name for name in annotations if isinstance(name, str))
+        names.update(
+            name
+            for name, value in vars(base).items()
+            if isinstance(name, str)
+            and (not name.startswith("_") or name == "__call__")
+            and (
+                isinstance(value, (property, staticmethod, classmethod))
+                or inspect.isfunction(value)
+            )
+        )
+    if dataclasses.is_dataclass(expression):
+        try:
+            names.update(field.name for field in dataclasses.fields(expression))
+        except (TypeError, ValueError):
+            return MemberShape(
+                (),
+                completeness=ShapeCompleteness.UNKNOWN,
+                provenance=provenance,
+                provider=provider,
+            )
+    shape = _build_member_shape(
+        expression,
+        tuple(sorted(names)),
+        state=state,
+        provenance=provenance,
+        provider=provider,
+        protocol=False,
+    )
+    if any(
+        name in vars(base)
+        for base in getattr(expression, "__mro__", (expression,))
+        if base is not object
+        for name in ("__getattr__", "__getattribute__")
+    ):
+        return MemberShape(
+            shape.members,
+            completeness=ShapeCompleteness.UNKNOWN,
+            provenance=shape.provenance,
+            provider=shape.provider,
+        )
+    return shape
+
+
+def _normalize_member_shape(
+    expression: type[Any],
+    *,
+    state: NormalizationBudget,
+    provenance: RepresentationProvenance,
+    provider: str,
+) -> MemberShape:
+    names, names_complete = _protocol_member_names(expression)
+    return _build_member_shape(
+        expression,
+        names,
+        state=state,
+        provenance=provenance,
+        provider=provider,
+        protocol=True,
+        names_complete=names_complete,
+    )
+
+
+def _build_member_shape(  # noqa: PLR0913 - shape extraction carries explicit evidence
+    expression: type[Any],
+    names: tuple[str, ...],
+    *,
+    state: NormalizationBudget,
+    provenance: RepresentationProvenance,
+    provider: str,
+    protocol: bool,
+    names_complete: bool = True,
+) -> MemberShape:
+    """Build a MemberShape without executing descriptors or annotations."""
+
+    completeness = (
+        ShapeCompleteness.COMPLETE if names_complete else ShapeCompleteness.UNKNOWN
+    )
+    if any(name in {"__getattr__", "__getattribute__"} for name in names):
+        completeness = ShapeCompleteness.UNKNOWN
+    members: list[tuple[str, MemberSpec]] = []
+    declarations: dict[str, list[MemberSpec]] = {}
+    for base in getattr(expression, "__mro__", (expression,)):
+        if base in {object, typing.Protocol, typing.Generic}:
+            continue
+        base_names = set(vars(base).get("__annotations__", {}))
+        base_names.update(
+            name
+            for name in vars(base)
+            if isinstance(name, str)
+            and (not name.startswith("_") or name == "__call__")
+        )
+        for name in names:
+            if name not in base_names:
+                continue
+            spec, spec_complete = _extract_member_spec(
+                base, name, state=state, annotation_owner=expression
+            )
+            if spec is not None:
+                declarations.setdefault(name, []).append(spec)
+            if not spec_complete:
+                completeness = ShapeCompleteness.UNKNOWN
+
+    for name in names:
+        specs = declarations.get(name, [])
+        if not specs:
+            completeness = ShapeCompleteness.UNKNOWN
+            continue
+        selected = specs[0]
+        # A member explicitly redeclared on the concrete Protocol wins through
+        # normal MRO.  Conflicts among inherited declarations are unsafe.
+        declared_here = name in vars(expression).get(
+            "__annotations__", {}
+        ) or name in vars(expression)
+        if not declared_here and any(spec != selected for spec in specs[1:]):
+            completeness = ShapeCompleteness.UNKNOWN
+        members.append((name, selected))
+
+    return MemberShape(
+        tuple(sorted(members)),
+        completeness=completeness,
+        provenance=provenance,
+        provider=provider,
+    )
+
+
+def _extract_member_spec(  # noqa: PLR0911 - ordered descriptor branches
+    declaring: type[Any],
+    name: str,
+    *,
+    state: NormalizationBudget,
+    annotation_owner: type[Any],
+) -> tuple[MemberSpec | None, bool]:
+    """Extract one member from a class dictionary using static metadata."""
+
+    annotations = vars(declaring).get("__annotations__", {})
+    annotation = (
+        annotations.get(name, _MISSING)
+        if isinstance(annotations, Mapping)
+        else _MISSING
+    )
+    raw = vars(declaring).get(name, _MISSING)
+    member_provenance = RepresentationProvenance(
+        f"{declaring.__module__}.{declaring.__qualname__}.{name}"
+    )
+    if isinstance(raw, property):
+        signature, complete = _normalize_property(
+            raw, state=state, owner=annotation_owner
+        )
+        value_type = signature.return_type if signature is not None else None
+        return (
+            MemberSpec(
+                value_type=value_type,
+                kind=MemberKind.PROPERTY,
+                read_only=raw.fset is None,
+                signature=signature,
+                provenance=member_provenance,
+            ),
+            complete,
+        )
+    if isinstance(raw, staticmethod):
+        signature, complete = _normalize_callable_shape(
+            raw.__func__, state=state, skip_first=False, owner=annotation_owner
+        )
+        return MemberSpec(
+            None, MemberKind.METHOD, signature=signature, provenance=member_provenance
+        ), complete
+    if isinstance(raw, classmethod):
+        signature, complete = _normalize_callable_shape(
+            raw.__func__, state=state, skip_first=True, owner=annotation_owner
+        )
+        return MemberSpec(
+            None, MemberKind.METHOD, signature=signature, provenance=member_provenance
+        ), complete
+    if inspect.isfunction(raw):
+        signature, complete = _normalize_callable_shape(
+            raw, state=state, skip_first=True, owner=annotation_owner
+        )
+        return MemberSpec(
+            None, MemberKind.METHOD, signature=signature, provenance=member_provenance
+        ), complete
+    if annotation is _MISSING:
+        if raw is _MISSING:
+            return None, False
+        return None, False
+    if _is_unsupported_member_qualifier(annotation):
+        return None, False
+    value_type, complete = _normalize_member_annotation(
+        annotation, owner=annotation_owner, state=state
+    )
+    if dataclasses.is_dataclass(declaring):
+        try:
+            field = next(
+                (item for item in dataclasses.fields(declaring) if item.name == name),
+                None,
+            )
+        except (TypeError, ValueError):
+            field = None
+        if field is None and name not in annotations:
+            return None, False
+        params = getattr(declaring, "__dataclass_params__", None)
+        frozen = bool(params and getattr(params, "frozen", False))
+    else:
+        frozen = False
+    return MemberSpec(
+        value_type, MemberKind.ATTRIBUTE, read_only=frozen, provenance=member_provenance
+    ), complete
+
+
+def _is_unsupported_member_qualifier(annotation: Any) -> bool:
+    origin = typing.get_origin(annotation)
+    return origin in {
+        getattr(typing, "ClassVar", object()),
+        getattr(typing, "Final", object()),
+    }
+
+
+def _normalize_member_annotation(
+    annotation: Any,
+    *,
+    owner: type[Any],
+    state: NormalizationBudget,
+) -> tuple[NormalizedType, bool]:
+    if isinstance(annotation, str):
+        if annotation in {owner.__name__, owner.__qualname__}:
+            return NormalizedType(NormalizedKind.CLASS, owner), True
+        return _unknown_normalized_type(annotation), False
+    forward_arg = getattr(annotation, "__forward_arg__", None)
+    if isinstance(forward_arg, str):
+        if forward_arg in {owner.__name__, owner.__qualname__}:
+            return NormalizedType(NormalizedKind.CLASS, owner), True
+        return _unknown_normalized_type(annotation), False
+    try:
+        return _normalize(annotation, state=state), True
+    except (NormalizationError, AttributeError, TypeError, ValueError):
+        return _unknown_normalized_type(annotation), False
+
+
+def _normalize_callable_shape(
+    function: Any,
+    *,
+    state: NormalizationBudget,
+    skip_first: bool,
+    owner: type[Any],
+) -> tuple[CallableShape, bool]:
+    try:
+        signature = inspect.signature(function, eval_str=False)
+    except (TypeError, ValueError):
+        return CallableShape((), None, ShapeCompleteness.UNKNOWN), False
+    parameters = list(signature.parameters.values())
+    if skip_first and parameters:
+        parameters = parameters[1:]
+    complete = True
+    normalized_parameters: list[ParameterSpec] = []
+    for parameter in parameters:
+        if parameter.annotation is inspect.Parameter.empty:
+            value_type = _unknown_normalized_type(parameter.name)
+            complete = False
+        else:
+            value_type, parameter_complete = _normalize_member_annotation(
+                parameter.annotation, owner=owner, state=state
+            )
+            complete = complete and parameter_complete
+        normalized_parameters.append(
+            ParameterSpec(
+                parameter.name,
+                parameter.kind.name,
+                value_type,
+                parameter.default is inspect.Parameter.empty,
+                RepresentationProvenance(_carrier_name(parameter.annotation))
+                if parameter.annotation is not inspect.Parameter.empty
+                else None,
+            )
+        )
+    if signature.return_annotation is inspect.Signature.empty:
+        return_type = None
+        complete = False
+    else:
+        return_type, return_complete = _normalize_member_annotation(
+            signature.return_annotation, owner=owner, state=state
+        )
+        complete = complete and return_complete
+    shape = CallableShape(
+        tuple(normalized_parameters),
+        return_type,
+        completeness=ShapeCompleteness.COMPLETE
+        if complete
+        else ShapeCompleteness.UNKNOWN,
+        provenance=RepresentationProvenance(_carrier_name(function)),
+    )
+    return shape, complete
+
+
+def _normalize_property(
+    property_object: property,
+    *,
+    state: NormalizationBudget,
+    owner: type[Any],
+) -> tuple[CallableShape | None, bool]:
+    if property_object.fget is None:
+        return None, False
+    getter, complete = _normalize_callable_shape(
+        property_object.fget, state=state, skip_first=True, owner=owner
+    )
+    if property_object.fset is not None:
+        setter, setter_complete = _normalize_callable_shape(
+            property_object.fset, state=state, skip_first=True, owner=owner
+        )
+        complete = complete and setter_complete
+        if (
+            getter.return_type is not None
+            and setter.parameters
+            and setter.parameters[0].value_type is not None
+            and getter.return_type != setter.parameters[0].value_type
+        ):
+            complete = False
+    return getter, complete
 
 
 _MISSING = object()
@@ -999,10 +1501,14 @@ def _substitute_normalized_type(
         expression.value,
         members=members,
         provenance=expression.provenance,
+        shape=expression.shape,
+        member_shape=expression.member_shape,
     )
 
 
-def _semantic_sort_key(expression: NormalizedType) -> tuple[str, str]:
+def _semantic_sort_key(  # noqa: PLR0911 - one branch per normalized kind
+    expression: NormalizedType,
+) -> tuple[str, str]:
     if expression.kind is NormalizedKind.CLASS:
         value = expression.value
         assert isinstance(value, type)
@@ -1042,7 +1548,36 @@ def _semantic_sort_key(expression: NormalizedType) -> tuple[str, str]:
             expression.kind.value,
             f"{shape.openness.value}:{shape.completeness.value}:{keys}{extra}",
         )
+    if expression.kind is NormalizedKind.PROTOCOL:
+        shape = expression.value
+        assert isinstance(shape, MemberShape)
+        members = ",".join(
+            f"{name}:{spec.kind.value}:{int(spec.read_only)}:"
+            f"{':'.join(_semantic_sort_key(spec.value_type)) if spec.value_type is not None else ''}:"
+            f"{_callable_sort_key(spec.signature)}"
+            for name, spec in shape.members
+        )
+        return (
+            expression.kind.value,
+            f"{shape.completeness.value}:{members}",
+        )
     return (
         expression.kind.value,
         ",".join(":".join(_semantic_sort_key(member)) for member in expression.members),
     )
+
+
+def _callable_sort_key(signature: CallableShape | None) -> str:
+    if signature is None:
+        return ""
+    parameters = ",".join(
+        f"{parameter.name}:{parameter.kind}:{int(parameter.required)}:"
+        f"{':'.join(_semantic_sort_key(parameter.value_type)) if parameter.value_type is not None else ''}"
+        for parameter in signature.parameters
+    )
+    result = (
+        ":".join(_semantic_sort_key(signature.return_type))
+        if signature.return_type is not None
+        else ""
+    )
+    return f"{signature.completeness.value}:{parameters}->{result}"
