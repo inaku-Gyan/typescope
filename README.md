@@ -22,7 +22,7 @@ points are:
 - `just testcov` writes the machine-readable `coverage.xml` report.
 - `just build` creates the wheel and source distribution in `dist/`.
 - `just verify-dist` installs both artifacts into isolated environments and runs an API smoke test.
-- `just release-check v0.0.3` validates a version tag against the built metadata.
+- `just release-check v0.0.6` validates a version tag against the built metadata.
 
 The current native profile includes structural assignability for TypedDict schemas and
 Protocol member shapes, with explicit capability-unknown results for incomplete runtime
