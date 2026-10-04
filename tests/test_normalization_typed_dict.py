@@ -1,7 +1,7 @@
 """TypedDict normalization and KeyShape evidence tests."""
 
 import typing
-from typing import ForwardRef, NotRequired, TypedDict
+from typing import NotRequired, TypedDict
 
 from typescope._normalization import (
     KeyShape,
@@ -13,32 +13,37 @@ from typescope._normalization import (
 
 _ReadOnly = getattr(typing, "ReadOnly", None)
 
+if _ReadOnly is not None:
 
-class _ReadOnlyFallback:
-    """Make the fixture parse on runtimes before the ReadOnly backport."""
+    class Profile(TypedDict):
+        name: str
+        alias: NotRequired[str]
+        identifier: _ReadOnly[int]
 
-    @classmethod
-    def __class_getitem__(cls, item: object) -> object:
-        return item
+    class EquivalentProfile(TypedDict):
+        identifier: _ReadOnly[int]
+        alias: NotRequired[str]
+        name: str
+
+else:
+
+    class Profile(TypedDict):
+        name: str
+        alias: NotRequired[str]
+        identifier: int
+
+    class EquivalentProfile(TypedDict):
+        identifier: int
+        alias: NotRequired[str]
+        name: str
 
 
-ReadOnly = _ReadOnly or _ReadOnlyFallback
-
-
-class Profile(TypedDict):
-    name: str
-    alias: NotRequired[str]
-    identifier: ReadOnly[int]
-
-
-class EquivalentProfile(TypedDict):
-    identifier: ReadOnly[int]
-    alias: NotRequired[str]
-    name: str
+if typing.TYPE_CHECKING:
+    MissingType: object
 
 
 class UnresolvedProfile(TypedDict):
-    value: ForwardRef("MissingType")
+    value: "MissingType"  # noqa: F821
 
 
 def test_typed_dict_normalizes_to_complete_immutable_key_shape() -> None:
