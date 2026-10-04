@@ -526,6 +526,11 @@ def _normalize_typed_dict_openness(  # noqa: PLR0911 - explicit openness branche
     )
     if invalid:
         return ShapeOpenness.UNKNOWN, None, False
+    if read_only_marker and (
+        getattr(expression, "__readonly_keys__", _MISSING) is _MISSING
+        or getattr(expression, "__mutable_keys__", _MISSING) is _MISSING
+    ):
+        return ShapeOpenness.UNKNOWN, None, False
     try:
         value_type = _normalize(value_annotation, state=state)
     except NormalizationError:
