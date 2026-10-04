@@ -24,6 +24,11 @@ points are:
 - `just verify-dist` installs both artifacts into isolated environments and runs an API smoke test.
 - `just release-check v0.0.3` validates a version tag against the built metadata.
 
+The current native profile includes structural assignability for TypedDict schemas and
+Protocol member shapes, with explicit capability-unknown results for incomplete runtime
+evidence. See the [structural assignability implementation status](docs/implementation-status.md)
+for the supported boundaries and validation evidence.
+
 Releases are made from protected `v<version>` tags. GitHub Actions validates both artifacts before
 publishing through PyPI Trusted Publishing (OIDC); ordinary branches and manual validation runs do
 not publish packages.

@@ -35,8 +35,10 @@ capability unknown.
 TypedDict-to-TypedDict is the first native structural rule using `KeyShape`. Requiredness,
 value type, mutability/read-only state, and supported openness evidence participate in the
 relation. Standard-library and known `typing_extensions` forms share semantic identity.
-The first profile does not invent `ReadOnly` semantics when the runtime cannot expose them,
-and future `closed`/`extra_items` forms remain capability boundaries until supported.
+`ReadOnly` participates when the runtime exposes complete public metadata; missing
+mutability metadata remains capability unknown. `closed` and `extra_items` participate when
+their public metadata is complete, while unsupported or partial openness evidence remains a
+capability boundary.
 Ordinary `dict[K, V]` is not assignable to a TypedDict merely because its key and value
 parameters are compatible.
 
