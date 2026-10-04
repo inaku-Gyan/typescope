@@ -85,6 +85,11 @@ class UnsafeSource:
     value: int = UnsafeDescriptor()
 
 
+class UnregisteredModel:
+    __dataclass_transform__ = {}
+    value: int
+
+
 @dataclass
 class DataRecord:
     name: str
@@ -126,12 +131,52 @@ class ParentRight(Protocol):
     child: NestedRight
 
 
+class NestedRecursiveLeft(Protocol):
+    child: "NestedRecursiveLeft"
+
+
+class NestedRecursiveRight(Protocol):
+    child: "NestedRecursiveRight"
+
+
+class ParentRecursiveLeft(Protocol):
+    child: NestedRecursiveLeft
+
+
+class ParentRecursiveRight(Protocol):
+    child: NestedRecursiveRight
+
+
 class OptionalArgument(Protocol):
     def render(self, width: int, precision: int = 1) -> str: ...
 
 
 class RequiredArgument(Protocol):
     def render(self, width: int, precision: int) -> str: ...
+
+
+class PositionalSource(Protocol):
+    def render(self, width: int) -> str: ...
+
+
+class PositionalDestination(Protocol):
+    def render(self, width: int, /) -> str: ...
+
+
+class VariadicSource(Protocol):
+    def render(self, width: int, *extra: int) -> str: ...
+
+
+class VariadicDestination(Protocol):
+    def render(self, width: int, extra: int) -> str: ...
+
+
+class KeywordSource(Protocol):
+    def render(self, **values: int) -> str: ...
+
+
+class KeywordDestination(Protocol):
+    def render(self, *, width: int) -> str: ...
 
 
 class UnresolvedProtocol(Protocol):
@@ -174,6 +219,7 @@ def test_unresolved_or_dynamic_concrete_evidence_is_unknown() -> None:
     assert _status(UnresolvedSource, protocol) is AssignabilityStatus.UNKNOWN
     assert _status(DynamicSource, protocol) is AssignabilityStatus.UNKNOWN
     assert _status(UnsafeSource, protocol) is AssignabilityStatus.UNKNOWN
+    assert _status(UnregisteredModel, protocol) is AssignabilityStatus.UNKNOWN
 
 
 def test_dataclass_fields_are_controlled_protocol_source_evidence() -> None:
@@ -195,8 +241,26 @@ def test_protocol_method_requiredness_is_checked() -> None:
     )
 
 
+def test_protocol_methods_allow_safe_positional_and_variadic_sources() -> None:
+    assert (
+        _status(PositionalSource, PositionalDestination)
+        is AssignabilityStatus.ASSIGNABLE
+    )
+    assert (
+        _status(VariadicSource, VariadicDestination) is AssignabilityStatus.ASSIGNABLE
+    )
+    assert _status(KeywordSource, KeywordDestination) is AssignabilityStatus.ASSIGNABLE
+
+
 def test_nested_protocol_members_are_compared_structurally() -> None:
     assert _status(ParentLeft, ParentRight) is AssignabilityStatus.ASSIGNABLE
+
+
+def test_nested_recursive_protocol_members_are_bounded() -> None:
+    assert (
+        _status(ParentRecursiveLeft, ParentRecursiveRight)
+        is AssignabilityStatus.ASSIGNABLE
+    )
 
 
 def test_incomplete_protocol_identity_remains_unknown() -> None:

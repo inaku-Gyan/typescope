@@ -118,12 +118,7 @@ def evaluate_native(
             normalized_destination.provenance.carrier
         )
         for normalized in (normalized_source, normalized_destination):
-            if (
-                normalized.kind is NormalizedKind.PROTOCOL
-                and isinstance(normalized.value, MemberShape)
-                and normalized.value.declaration is not None
-            ):
-                context.protocol_shapes[normalized.value.declaration] = normalized.value
+            _register_protocol_shapes(normalized, context)
     except NormalizationError as exc:
         context.capability_evidence.append(exc.reason_code)
         return _Decision(
@@ -176,6 +171,41 @@ def evaluate_native(
         provenance=tuple(context.representation_provenance),
         evidence=tuple(context.capability_evidence),
     )
+
+
+def _register_protocol_shapes(
+    expression: NormalizedType,
+    context: EvaluationContext,
+    seen: set[int] | None = None,
+) -> None:
+    """Index nested normalized Protocol shapes for recursive references."""
+
+    visited = seen if seen is not None else set()
+    identity = id(expression)
+    if identity in visited:
+        return
+    visited.add(identity)
+    if expression.kind is NormalizedKind.PROTOCOL and isinstance(
+        expression.value, MemberShape
+    ):
+        shape = expression.value
+        if shape.declaration is not None:
+            context.protocol_shapes[shape.declaration] = shape
+        for _, member in shape.members:
+            if member.value_type is not None:
+                _register_protocol_shapes(member.value_type, context, visited)
+            if member.signature is not None:
+                if member.signature.return_type is not None:
+                    _register_protocol_shapes(
+                        member.signature.return_type, context, visited
+                    )
+                for parameter in member.signature.parameters:
+                    if parameter.value_type is not None:
+                        _register_protocol_shapes(
+                            parameter.value_type, context, visited
+                        )
+    for member in expression.members:
+        _register_protocol_shapes(member, context, visited)
 
 
 def _evaluate(  # noqa: PLR0911 - ordered semantic dispatch
@@ -547,6 +577,22 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
     source_parameters = source.parameters
     destination_parameters = destination.parameters
     unknown: _Decision | None = None
+    source_varargs = next(
+        (
+            parameter
+            for parameter in source_parameters
+            if parameter.kind == "VAR_POSITIONAL"
+        ),
+        None,
+    )
+    source_kwargs = next(
+        (
+            parameter
+            for parameter in source_parameters
+            if parameter.kind == "VAR_KEYWORD"
+        ),
+        None,
+    )
     if sum(parameter.required for parameter in source_parameters) > len(
         destination_parameters
     ):
@@ -554,19 +600,56 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
             path + ("parameters",), reason_code="protocol.method_parameters"
         )
     for index, destination_parameter in enumerate(destination_parameters):
-        if index >= len(source_parameters):
+        if destination_parameter.kind == "VAR_POSITIONAL":
+            source_parameter = next(
+                (
+                    parameter
+                    for parameter in source_parameters
+                    if parameter.kind == "VAR_POSITIONAL"
+                ),
+                None,
+            )
+        elif destination_parameter.kind == "VAR_KEYWORD":
+            source_parameter = source_kwargs
+        elif index >= len(source_parameters):
+            source_parameter = source_varargs or source_kwargs
+        elif source_parameters[
+            index
+        ].kind == "VAR_POSITIONAL" and destination_parameter.kind in {
+            "POSITIONAL_ONLY",
+            "POSITIONAL_OR_KEYWORD",
+        }:
+            source_parameter = source_varargs
+        elif (
+            source_parameters[index].kind == "VAR_KEYWORD"
+            and destination_parameter.kind == "KEYWORD_ONLY"
+        ):
+            source_parameter = source_kwargs
+        else:
+            source_parameter = source_parameters[index]
+        if source_parameter is None:
             return _not_assignable(
                 path + ("parameter", str(index)),
                 reason_code="protocol.method_parameters",
             )
-        source_parameter = source_parameters[index]
-        if source_parameter.kind != destination_parameter.kind:
+        kind_compatible = _callable_parameter_kinds_compatible(
+            source_parameter.kind, destination_parameter.kind
+        )
+        if kind_compatible is None:
+            return _unknown(
+                context,
+                path + ("parameter", str(index)),
+                "protocol.method_signature_unknown",
+                "callable parameter kinds need unsupported variadic inference",
+            )
+        if not kind_compatible:
             return _not_assignable(
                 path + ("parameter", str(index)),
                 reason_code="protocol.method_parameters",
             )
         if (
             destination_parameter.kind in {"POSITIONAL_OR_KEYWORD", "KEYWORD_ONLY"}
+            and source_parameter.kind not in {"VAR_POSITIONAL", "VAR_KEYWORD"}
             and source_parameter.name != destination_parameter.name
         ):
             return _not_assignable(
@@ -606,6 +689,26 @@ def _compare_callable_shapes(  # noqa: PLR0911, PLR0912 - explicit call-shape ru
     if return_decision.status is AssignabilityStatus.UNKNOWN:
         unknown = return_decision
     return unknown or _assignable(path + ("callable",))
+
+
+def _callable_parameter_kinds_compatible(source: str, destination: str) -> bool | None:
+    if source == destination:
+        return True
+    if source == "POSITIONAL_OR_KEYWORD" and destination in {
+        "POSITIONAL_ONLY",
+        "KEYWORD_ONLY",
+    }:
+        return True
+    if source == "VAR_POSITIONAL" and destination in {
+        "POSITIONAL_ONLY",
+        "POSITIONAL_OR_KEYWORD",
+    }:
+        return True
+    if source == "VAR_KEYWORD" and destination == "KEYWORD_ONLY":
+        return True
+    if destination in {"VAR_POSITIONAL", "VAR_KEYWORD"}:
+        return False
+    return False
 
 
 def _protocol_member_path(name: str) -> str:
